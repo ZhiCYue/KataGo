@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+
+analysis_logs/
+backend/shared_position.json
+
+.claude/
+.playwright-mcp/

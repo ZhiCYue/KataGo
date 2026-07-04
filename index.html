@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>弈枰 · 围棋人机对弈</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=20260619" />
+</head>
+<body>
+  <div class="grain"></div>
+  <main class="layout">
+    <!-- 棋盘区 -->
+    <section class="board-wrap">
+      <div class="board-frame">
+        <canvas id="board"></canvas>
+      </div>
+      <div id="message" class="message"></div>
+
+      <!-- 上传识别后的人工校正条 -->
+      <div id="editPanel" class="edit-panel">
+        <div class="edit-title">核对识别结果 <span id="editCount" class="edit-count"></span></div>
+        <div class="edit-hint">点击交叉点循环切换：空 → 黑 → 白</div>
+        <div class="edit-row">
+          <span class="edit-lab">路数</span>
+          <div class="seg sm">
+            <button data-editsize="9">9</button>
+            <button data-editsize="13">13</button>
+            <button data-editsize="19">19</button>
+          </div>
+        </div>
+        <div class="edit-row">
+          <span class="edit-lab">轮到</span>
+          <div class="seg sm">
+            <button data-editturn="1">黑走</button>
+            <button data-editturn="2">白走</button>
+          </div>
+        </div>
+        <div class="edit-actions">
+          <button id="btnEditApply" class="btn accent">应用并同步</button>
+          <button id="btnEditCancel" class="btn ghost">取消</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 控制面板 -->
+    <aside class="panel">
+      <header class="brand">
+        <div class="brand-mark">弈<span>枰</span></div>
+        <div class="brand-sub">围棋 · 人机对弈</div>
+      </header>
+
+      <div id="turnIndicator" class="turn"></div>
+
+      <div class="stats">
+        <div class="stat"><span class="stat-num" id="moveNum">0</span><span class="stat-lab">手数</span></div>
+        <div class="stat"><span class="stat-num" id="capBlack">0</span><span class="stat-lab">黑提子</span></div>
+        <div class="stat"><span class="stat-num" id="capWhite">0</span><span class="stat-lab">白提子</span></div>
+      </div>
+
+      <div class="field">
+        <label>棋盘</label>
+        <div class="seg">
+          <button data-size="9">9 路</button>
+          <button data-size="13">13 路</button>
+          <button data-size="19" class="active">19 路</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>AI 执方</label>
+        <div class="seg">
+          <button data-aiside="0">不托管</button>
+          <button data-aiside="1">AI 执黑</button>
+          <button data-aiside="2" class="active">AI 执白</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>导入布局</label>
+        <button id="btnUpload" class="btn accent full">📷 上传截图识别棋盘</button>
+        <input id="fileInput" type="file" accept="image/*" hidden />
+        <p class="note tiny">手机上传识别后会同步，PC 端自动载入。</p>
+      </div>
+
+      <div class="field">
+        <label>对手强度</label>
+        <div class="seg grid2">
+          <button data-engine="local" data-level="beginner">入门 · 本地</button>
+          <button data-engine="local" data-level="medium" class="active">进阶 · 本地</button>
+          <button data-engine="katago" data-visits="120">高段 · KataGo</button>
+          <button data-engine="katago" data-visits="1200">职业 · KataGo</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>胜率 · 形势</label>
+        <div class="winrate">
+          <div class="wr-bar"><div id="wrFill" class="wr-fill"></div></div>
+          <div class="wr-row">
+            <span><i class="wr-dot black"></i><b id="wrBlack">50%</b></span>
+            <span id="wrLead" class="wr-lead">—</span>
+            <span><b id="wrWhite">50%</b><i class="wr-dot white"></i></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btnHint" class="btn accent">智能提示</button>
+        <button id="btnPass" class="btn">虚手</button>
+        <button id="btnUndo" class="btn">悔棋</button>
+        <button id="btnResign" class="btn">认输</button>
+        <button id="btnNew" class="btn ghost">新对局</button>
+      </div>
+
+      <p class="note">本地启发式 AI。后续可接入 KataGo 后端，获得真正的胜率与形势分析。</p>
+    </aside>
+  </main>
+
+  <!-- 终局结果 -->
+  <div id="result" class="result">
+    <div class="result-card">
+      <div id="resultText"></div>
+      <button class="btn accent" onclick="newGame()">再来一局</button>
+    </div>
+  </div>
+
+  <script src="js/engine.js?v=20260619"></script>
+  <script src="js/ai.js?v=20260619"></script>
+  <script src="js/board.js?v=20260619"></script>
+  <script src="js/main.js?v=20260619"></script>
+</body>
+</html>
