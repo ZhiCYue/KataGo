@@ -250,6 +250,20 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .btn.ghost { background: none; border-style: dashed; color: var(--ink-soft); }
 .btn.full { width: 100%; }
 
+/* —— 死活自定义思考量 —— */
+.tsumego-custom { display: none; align-items: center; gap: 12px; margin-top: 10px; }
+.tsumego-custom.show { display: flex; }
+.tsumego-custom input[type="range"] {
+  flex: 1; min-width: 0;
+  accent-color: var(--cinnabar);
+  touch-action: pan-x;   /* 手机上滑杆横向拖动，不触发页面滚动 */
+}
+.visits-val {
+  min-width: 52px; text-align: right;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 19px; font-weight: 600; color: var(--cinnabar-d);
+}
+
 /* —— 题库控件 —— */
 .tsumego-select {
   width: 100%; margin-bottom: 8px; padding: 11px 9px;

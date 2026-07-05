@@ -15,7 +15,7 @@ KataGo 后端服务（零第三方依赖，仅用标准库）
   python3 backend/server.py --katago $(which katago) \
       --model models/kata-network.bin.gz --config backend/analysis.cfg --port 8001
 """
-import argparse, json, subprocess, threading, sys, queue, time, os, re, html
+import argparse, hmac, json, subprocess, threading, sys, queue, time, os, re, html
 import mimetypes, posixpath, urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -163,19 +163,66 @@ def board_to_stones(board, size):
     return stones
 
 
+DENY_PAGE = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>弈枰 · 需要访问令牌</title>
+<style>body{font-family:"Noto Serif SC",serif;background:#ece3d2;color:#211b14;display:flex;
+align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}
+.card{max-width:420px;background:#f3ecdd;border:1px solid #cbbda1;border-radius:10px;
+padding:28px 30px;line-height:1.9;box-shadow:0 16px 40px -22px rgba(30,18,6,.5)}
+h1{font-size:22px;margin:0 0 10px}code{background:rgba(184,64,47,.1);color:#9c3324;
+padding:2px 6px;border-radius:4px}</style></head><body><div class="card">
+<h1>需要访问令牌</h1><p>本服务为私人使用。请在链接后附上令牌参数：</p>
+<p><code>https://…/?key=你的令牌</code></p>
+<p>验证一次后浏览器会自动记住，无需每次输入。</p></div></body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     katago = None    # 由 main 注入（可能为 None：未装 KataGo 时降级）
     positions = None  # PositionStore 实例
+    token = None     # 访问令牌；为 None 时不校验（仅本机/局域网用）
 
     def log_message(self, *a):
         pass  # 静默默认日志
+
+    def _authorized(self):
+        """校验访问令牌：?key= 查询参数 / Cookie / X-Access-Key 头，三者任一匹配即可。
+        用 ?key= 通过时会在响应里种 Cookie，之后页面资源与 API 请求自动携带。"""
+        self._grant_cookie = False
+        if not self.token:
+            return True
+        ok = lambda v: v is not None and hmac.compare_digest(v, self.token)
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if ok((qs.get("key") or [None])[0]):
+            self._grant_cookie = True
+            return True
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "yk" and ok(v):
+                return True
+        return ok(self.headers.get("X-Access-Key"))
+
+    def _deny(self):
+        if self._api_path() is not None:
+            return self._send(401, {"error": "需要访问令牌（?key=… 或 X-Access-Key 头）"})
+        body = DENY_PAGE.encode()
+        self.send_response(403)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _cookie_header(self):
+        # 90 天有效；HttpOnly 防脚本读取，SameSite=Lax 足够（同源页面 + API）
+        return "yk=%s; Path=/; Max-Age=7776000; SameSite=Lax; HttpOnly" % self.token
 
     def _send(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Access-Key")
+        if getattr(self, "_grant_cookie", False):
+            self.send_header("Set-Cookie", self._cookie_header())
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -184,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Access-Key")
         self.end_headers()
 
     def _api_path(self):
@@ -197,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def do_GET(self):
+        if not self._authorized():
+            return self._deny()
         r = self._api_path()
         if r is None:
             return self._serve_static()           # 非 API 一律按静态文件伺服
@@ -210,6 +259,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._authorized():
+            return self._deny()
         try:
             n = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(n) or "{}")
@@ -244,6 +295,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")  # 改了代码即时生效，避免缓存困扰
+        if getattr(self, "_grant_cookie", False):      # ?key= 验证通过：种 Cookie 记住
+            self.send_header("Set-Cookie", self._cookie_header())
         self.end_headers()
         self.wfile.write(body)
 
@@ -358,9 +411,15 @@ def main():
     ap.add_argument("--port", type=int, default=8000)
     # 默认绑定所有网卡，使同一局域网内的手机也能访问；如需仅本机可传 --host 127.0.0.1
     ap.add_argument("--host", default="0.0.0.0")
+    # 访问令牌：设置后所有请求（含网页）都需携带 ?key=令牌（或 Cookie / X-Access-Key 头）。
+    # 挂公网隧道时务必设置；不传则不校验（仅本机/局域网使用）。
+    ap.add_argument("--token", default="")
     args = ap.parse_args()
 
     Handler.positions = PositionStore()
+    if args.token:
+        Handler.token = args.token
+        sys.stderr.write("🔑 访问令牌已启用：链接需携带 ?key=%s（浏览器验证一次后自动记住）\n" % args.token)
 
     if args.katago and args.model and args.config:
         try:

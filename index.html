@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css?v=20260705d" />
+  <link rel="stylesheet" href="css/style.css?v=20260705e" />
 </head>
 <body data-mode="game">
   <div class="grain"></div>
@@ -89,7 +89,13 @@
         <div class="seg tsumego-strength">
           <button data-tsumego-strength="advanced" class="active">高阶</button>
           <button data-tsumego-strength="pro">职业</button>
+          <button data-tsumego-strength="custom">自定义</button>
         </div>
+        <div id="tsumegoCustom" class="tsumego-custom">
+          <input id="visitsRange" type="range" min="50" max="1600" step="50" value="220" />
+          <span id="visitsVal" class="visits-val">220</span>
+        </div>
+        <p class="note tiny">思考量（visits）越小应手越快、越大越强。参考：高阶 220，职业 900；100 以内约 1 秒应手。</p>
       </section>
 
       <section class="card tsumego-only">
@@ -174,9 +180,9 @@
 
   <script src="js/engine.js?v=20260619"></script>
   <script src="js/ai.js?v=20260619"></script>
-  <script src="js/board.js?v=20260705d"></script>
-  <script src="js/tsumego-bank.js?v=20260705d"></script>
-  <script src="js/tsumego.js?v=20260705d"></script>
-  <script src="js/main.js?v=20260705d"></script>
+  <script src="js/board.js?v=20260705e"></script>
+  <script src="js/tsumego-bank.js?v=20260705e"></script>
+  <script src="js/tsumego.js?v=20260705e"></script>
+  <script src="js/main.js?v=20260705f"></script>
 </body>
 </html>

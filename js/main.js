@@ -30,7 +30,8 @@ const state = {
   pendingImage: null,     // 待识别的图片 dataURL（切换路数时复用）
   // 死活练习
   tsumego: { collection: 'cho-3', index: 0, problem: null },
-  tsumegoStrength: 'advanced',
+  tsumegoStrength: 'advanced',   // 'advanced' | 'pro' | 'custom'
+  tsumegoCustomVisits: 220,      // 自定义档的思考量（visits）
   puzzleSolved: false,
 };
 
@@ -310,6 +311,10 @@ function jumpProblem() {
 }
 
 function tsumegoVisits(kind = 'reply') {
+  if (state.tsumegoStrength === 'custom') {
+    const v = state.tsumegoCustomVisits;
+    return kind === 'hint' ? Math.max(v, 200) : v;   // 提示保底 200，太浅的建议没参考价值
+  }
   if (state.tsumegoStrength === 'pro') return kind === 'hint' ? 1000 : 900;
   return kind === 'hint' ? 450 : 220;
 }
@@ -364,11 +369,11 @@ function scheduleProblemReply() {
     .then(r => {
       if (state.epoch !== ep) return;
       const mv = fromVertex(r.bestMove);
+      const tenuki = mv && isTenukiMove(mv);   // 须在落子前用当前盘面判断
       if (mv) pushPlay(mv.x, mv.y); else pushPass();
       updateWinrate(r.winrate, r.scoreLead);
-      const verdict = judgeProblem(r.ownership);
-      const reply = r.bestMove === 'pass' ? '虚手（白已无手可下）' : r.bestMove;
-      flash(`KataGo 应手：${reply}${verdict ? `　${verdict}` : ''}`);
+      const st = judgeProblem(r.ownership) || {};
+      flash(composeReplyMessage(r.bestMove, mv, tenuki, st));
     })
     .catch(err => {
       if (state.epoch !== ep) return;
@@ -385,10 +390,35 @@ function scheduleProblemReply() {
     });
 }
 
+/* 白棋应手是否为脱先/弃子：落点与盘上任何棋子的棋盘距离都超过 2 路即视为放弃局部 */
+function isTenukiMove(mv) {
+  const b = state.game.board, n = state.game.size;
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      if (b[y][x] && Math.max(Math.abs(x - mv.x), Math.abs(y - mv.y)) <= 2) return false;
+  return true;
+}
+
+/* 组装白方应手的播报文案：普通应手 / 虚手 / 弃子转身，结合死活判定给出明确含义 */
+function composeReplyMessage(bestMove, mv, tenuki, st) {
+  let msg;
+  if (!mv) {
+    msg = st.whiteDead ? '白棋虚手认输——已无法做活' : '白棋虚手（无手可下）';
+  } else if (tenuki) {
+    msg = st.whiteDead
+      ? `白棋弃子（改下 ${bestMove}）——这块已被你杀死`
+      : `白棋脱先（${bestMove}）——它认为你上一手不影响死活`;
+  } else {
+    msg = `KataGo 应手：${bestMove}`;
+  }
+  if (st.solvedNow) msg += '　🎉 正解！';
+  return msg;
+}
+
 /* 依据 KataGo ownership（黑视角，按行自左上排列）判断题区内双方棋块死活 */
 function judgeProblem(ownership) {
   const problem = currentProblem();
-  if (!problem || !Array.isArray(ownership)) return '';
+  if (!problem || !Array.isArray(ownership)) return null;
   const n = problem.size, r = problem.region;
   let bSum = 0, bCnt = 0, wSum = 0, wCnt = 0;
   for (let y = r.y0; y <= r.y1; y++)
@@ -415,7 +445,8 @@ function judgeProblem(ownership) {
                  (problem.goal === 'live' && blackAlive && !blackDead);
   const failed = (problem.goal === 'kill' && whiteAlive) ||
                  (problem.goal === 'live' && blackDead);
-  if (solved && !state.puzzleSolved) {
+  const solvedNow = solved && !state.puzzleSolved;
+  if (solvedNow) {
     state.puzzleSolved = true;
     verdict += ' — 🎉 目标达成！';
     showSeal('ok');
@@ -424,7 +455,7 @@ function judgeProblem(ownership) {
     showSeal('fail');
   }
   $('problemJudge').textContent = verdict;
-  return solved ? '🎉 目标达成！' : '';
+  return { whiteDead, whiteAlive, blackDead, blackAlive, solved, failed, solvedNow };
 }
 
 function showProblemHint() {
@@ -730,13 +761,28 @@ function bindControls() {
       updateWinrate(0.5, 0);
       if (state.engine === 'katago') checkBackend();
     }));
+  // 死活强度：高阶 / 职业 / 自定义（滑杆控制 visits，记住上次选择）
+  const applyStrengthUI = () => {
+    $('tsumegoCustom').classList.toggle('show', state.tsumegoStrength === 'custom');
+    $('visitsRange').value = state.tsumegoCustomVisits;
+    $('visitsVal').textContent = state.tsumegoCustomVisits;
+    setActive('[data-tsumego-strength]', document.querySelector(`[data-tsumego-strength="${state.tsumegoStrength}"]`));
+  };
+  state.tsumegoStrength = localStorage.getItem('tsumegoStrength') || state.tsumegoStrength;
+  state.tsumegoCustomVisits = parseInt(localStorage.getItem('tsumegoVisits'), 10) || state.tsumegoCustomVisits;
+  applyStrengthUI();
   document.querySelectorAll('[data-tsumego-strength]').forEach(btn =>
     btn.addEventListener('click', () => {
-      setActive('[data-tsumego-strength]', btn);
       state.tsumegoStrength = btn.dataset.tsumegoStrength;
-      const visits = tsumegoVisits('reply');
-      flash(`死活强度：${btn.textContent}（后手 ${visits} visits）`);
+      localStorage.setItem('tsumegoStrength', state.tsumegoStrength);
+      applyStrengthUI();
+      flash(`死活强度：${btn.textContent}（应手 ${tsumegoVisits('reply')} visits）`);
     }));
+  $('visitsRange').addEventListener('input', () => {
+    state.tsumegoCustomVisits = +$('visitsRange').value;
+    $('visitsVal').textContent = state.tsumegoCustomVisits;
+    localStorage.setItem('tsumegoVisits', String(state.tsumegoCustomVisits));
+  });
   $('btnNew').addEventListener('click', newGame);
   $('btnPass').addEventListener('click', doPass);
   $('btnUndo').addEventListener('click', doUndo);

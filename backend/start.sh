@@ -35,9 +35,26 @@ if [ ! -f "$CONFIG" ]; then
 fi
 
 PORT="${1:-8000}"   # 单端口同时伺服网页 + API（接口在 /api/* 下）
+
+# 访问令牌：首次生成后存 backend/.token（已 gitignore），之后复用。
+# 挂公网隧道必须带令牌访问；设 NO_TOKEN=1 可关闭校验（仅限本机/局域网调试）。
+TOKEN=""
+if [ "${NO_TOKEN:-0}" != "1" ]; then
+  TOKEN_FILE="backend/.token"
+  if [ ! -s "$TOKEN_FILE" ]; then
+    (openssl rand -hex 8 2>/dev/null || date +%s | shasum | head -c 16) > "$TOKEN_FILE"
+  fi
+  TOKEN="$(cat "$TOKEN_FILE")"
+fi
+
 echo "KataGo : $KATAGO"
 echo "网络   : $MODEL"
 echo "配置   : $CONFIG"
 echo "端口   : $PORT"
-echo "打开   : http://127.0.0.1:$PORT/"
-exec "$PY" backend/server.py --katago "$KATAGO" --model "$MODEL" --config "$CONFIG" --port "$PORT"
+if [ -n "$TOKEN" ]; then
+  echo "令牌   : $TOKEN"
+  echo "打开   : http://127.0.0.1:$PORT/?key=$TOKEN"
+else
+  echo "打开   : http://127.0.0.1:$PORT/  （未启用令牌）"
+fi
+exec "$PY" backend/server.py --katago "$KATAGO" --model "$MODEL" --config "$CONFIG" --port "$PORT" ${TOKEN:+--token "$TOKEN"}

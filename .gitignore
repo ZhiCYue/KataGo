@@ -3,6 +3,7 @@ __pycache__/
 
 analysis_logs/
 backend/shared_position.json
+backend/.token
 
 .claude/
 .playwright-mcp/
