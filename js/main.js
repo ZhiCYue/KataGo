@@ -12,6 +12,7 @@ const state = {
   engine: 'local',        // 'local' 本地启发式 | 'katago' 神经网络
   level: 'medium',        // 本地难度
   kataVisits: 200,        // KataGo 算力（越大越强）
+  gameCustomVisits: 400,  // 对局「自定义思考量」滑杆值
   komi: 7.5,
   thinking: false,
   epoch: 0,               // 局面代数：换题/新局时 +1，用于丢弃迟到的 AI 回包
@@ -52,7 +53,9 @@ function aiControlsTurn() { return state.aiSide !== 0 && state.game.turn === sta
 function humanTurnNow() {
   if (state.mode === 'tsumego') {
     const p = currentProblem();
-    return !state.editing && !state.thinking && !state.game.gameOver && p && state.game.turn === 1;
+    // 推演中黑白都可手动摆；正常训练只有黑（用户）先手可落子
+    return !state.editing && !state.thinking && !state.game.gameOver && p &&
+           (state.trial ? true : state.game.turn === 1);
   }
   return !state.editing && !state.thinking && !state.game.gameOver && !aiControlsTurn();
 }
@@ -212,16 +215,23 @@ function doResign() {
  * 推演模式：对局中切入，黑白都手动摆（AI 暂停）；
  * 再次切换时回滚到切入前的局面并恢复 AI 执方
  * ============================================================ */
+function setTrialButtons(on) {
+  document.querySelectorAll('.btn-trial').forEach(b => b.classList.toggle('on', on));
+}
+
 function toggleTrial() {
-  if (state.mode !== 'game' || state.editing || state.game.gameOver) return;
+  if (state.editing || state.game.gameOver) return;
+  if (state.mode === 'tsumego' && !currentProblem()) return;
   if (!state.trial) {
     state.epoch++;                     // 丢弃在途的 AI 回包，避免它落进推演局面
     state.thinking = false;
     state.view.interactive = true;
     state.trial = { moveNumber: state.game.moveNumber, movesLen: state.moves.length, aiSide: state.aiSide };
     state.aiSide = 0;
-    $('btnTrial').classList.add('on');
-    flash('推演开始：黑白都由你落子，再点「推演」回到当前局面');
+    setTrialButtons(true);
+    flash(state.mode === 'tsumego'
+      ? '推演开始：黑白都由你摆（仍限题目区域），再点「推演」返回'
+      : '推演开始：黑白都由你落子，再点「推演」回到当前局面');
   } else {
     const t = state.trial;
     state.epoch++;
@@ -229,22 +239,24 @@ function toggleTrial() {
     state.moves.length = Math.min(state.moves.length, t.movesLen);
     state.aiSide = t.aiSide;
     state.trial = null;
-    $('btnTrial').classList.remove('on');
+    setTrialButtons(false);
     setActive('[data-aiside]', document.querySelector(`[data-aiside="${state.aiSide}"]`));
     state.view.hintMove = null;
     state.view.draw();
-    flash('已回到推演前的局面，继续对局');
-    maybeAI();                         // 若轮到 AI 方，接着下
+    flash('已回到推演前的局面');
+    // 死活题：若返回时正轮白棋（推演切入时 KataGo 还没应手），让它接着应
+    if (state.mode === 'tsumego' && state.game.turn === 2) scheduleProblemReply();
+    else maybeAI();                    // 对局：若轮到 AI 方，接着下
   }
   updateStatus();
 }
 
 function exitTrialSilently() {
-  // 换模式/新局时直接丢弃推演状态（局面随后会被重建，无需回滚）
+  // 换模式/新局/换题时直接丢弃推演状态（局面随后会被重建，无需回滚）
   if (!state.trial) return;
   state.aiSide = state.trial.aiSide;
   state.trial = null;
-  $('btnTrial').classList.remove('on');
+  setTrialButtons(false);
   setActive('[data-aiside]', document.querySelector(`[data-aiside="${state.aiSide}"]`));
 }
 
@@ -297,6 +309,7 @@ function loadProblem(cid, index) {
   if (!problem) return;
   state.mode = 'tsumego';
   state.epoch++;
+  exitTrialSilently();
   state.tsumego.collection = cid;
   state.tsumego.index = problem.index;
   state.tsumego.problem = problem;
@@ -400,6 +413,7 @@ function handleProblemPlay(x, y) {
   state.view.hintMove = null;
   state.view.draw();
   updateStatus();
+  if (state.trial) return;   // 推演中：不触发 KataGo 应手，黑白都手动摆
   scheduleProblemReply();
 }
 
@@ -519,41 +533,6 @@ function showProblemHint() {
     .catch(() => flash('KataGo 后端未连接，无法分析提示'));
 }
 
-function searchTsumegoOnline() {
-  const input = $('tsumegoSearchInput');
-  const results = $('tsumegoSearchResults');
-  const q = (input.value || '').trim() || '高级死活题';
-  results.innerHTML = '<div class="search-note">搜索中…</div>';
-  fetch(`${state.backendUrl}/tsumego-search?q=${encodeURIComponent(q)}`)
-    .then(r => r.json().then(j => ({ ok: r.ok, j })))
-    .then(({ ok, j }) => {
-      if (!ok) throw new Error(j.error || '搜索失败');
-      renderSearchResults(j.results || []);
-    })
-    .catch(e => {
-      results.innerHTML = `<div class="search-note">${escapeHtml(e.message)}。请确认后端已启动且能访问外网。</div>`;
-    });
-}
-
-function renderSearchResults(items) {
-  const results = $('tsumegoSearchResults');
-  if (!items.length) {
-    results.innerHTML = '<div class="search-note">没有找到结果，换个关键词试试。</div>';
-    return;
-  }
-  results.innerHTML = items.map(item => {
-    const title = escapeHtml(item.title || item.url);
-    const url = escapeHtml(item.url || '#');
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}<span class="search-url">${url}</span></a>`;
-  }).join('');
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, ch => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[ch]));
-}
-
 /* —— KataGo 后端请求 —— */
 async function kataQuery(path, maxVisits, extra = {}) {
   const res = await fetch(state.backendUrl + path, {
@@ -611,11 +590,15 @@ function updateStatus() {
   if (state.mode === 'tsumego') {
     const p = currentProblem();
     if (!p) return;
+    const dot = `<span class="stone-dot ${g.turn === 1 ? 'black' : 'white'}"></span>`;
+    if (state.trial) {
+      turnEl.innerHTML = `${dot}<span class="turn-label">${g.turn === 1 ? '黑' : '白'}方 · 推演中（点「推演」返回）</span>`;
+      return;
+    }
     if (state.puzzleSolved) {
       turnEl.innerHTML = '<span class="turn-label">死活题完成 · 目标达成 🎉</span>';
       return;
     }
-    const dot = `<span class="stone-dot ${g.turn === 1 ? 'black' : 'white'}"></span>`;
     const who = state.thinking ? 'KataGo（白）应手中…' : '你执黑先手';
     turnEl.innerHTML = `${dot}<span class="turn-label">${g.turn === 1 ? '黑' : '白'}方 · ${who}</span>`;
     return;
@@ -802,15 +785,30 @@ function bindControls() {
       updateStatus();
       maybeAI(); // 切换后若已轮到 AI 方，立即接管
     }));
+  // 对局对手强度：本地两档 / KataGo 两档预设 / KataGo 自定义思考量（滑杆，记住数值）
+  state.gameCustomVisits = parseInt(localStorage.getItem('gameVisits'), 10) || state.gameCustomVisits;
+  $('gameVisitsRange').value = state.gameCustomVisits;
+  $('gameVisitsVal').textContent = state.gameCustomVisits;
   document.querySelectorAll('[data-engine]').forEach(btn =>
     btn.addEventListener('click', () => {
       setActive('[data-engine]', btn);
       state.engine = btn.dataset.engine;
       if (btn.dataset.level) state.level = btn.dataset.level;
       if (btn.dataset.visits) state.kataVisits = +btn.dataset.visits;
+      if (btn.dataset.custom) state.kataVisits = state.gameCustomVisits;
+      $('gameCustom').classList.toggle('show', !!btn.dataset.custom);
       updateWinrate(0.5, 0);
-      if (state.engine === 'katago') checkBackend();
+      if (state.engine === 'katago') {
+        flash(`KataGo 思考量：${state.kataVisits} visits`);
+        checkBackend();
+      }
     }));
+  $('gameVisitsRange').addEventListener('input', () => {
+    state.gameCustomVisits = +$('gameVisitsRange').value;
+    $('gameVisitsVal').textContent = state.gameCustomVisits;
+    localStorage.setItem('gameVisits', String(state.gameCustomVisits));
+    if ($('gameCustom').classList.contains('show')) state.kataVisits = state.gameCustomVisits;
+  });
   // 死活强度：高阶 / 职业 / 自定义（滑杆控制 visits，记住上次选择）
   const applyStrengthUI = () => {
     $('tsumegoCustom').classList.toggle('show', state.tsumegoStrength === 'custom');
@@ -838,6 +836,7 @@ function bindControls() {
   $('btnUndo').addEventListener('click', doUndo);
   $('btnHint').addEventListener('click', doHint);
   $('btnTrial').addEventListener('click', toggleTrial);
+  $('btnTrialTsumego').addEventListener('click', toggleTrial);
   $('btnResign').addEventListener('click', doResign);
   $('btnProblemHint').addEventListener('click', showProblemHint);
   $('btnProblemReset').addEventListener('click', resetProblem);
@@ -849,11 +848,6 @@ function bindControls() {
   $('tsumegoCollection').addEventListener('change', () => {
     if (state.mode === 'tsumego') randomProblem();
   });
-  $('btnTsumegoSearch').addEventListener('click', searchTsumegoOnline);
-  $('tsumegoSearchInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') searchTsumegoOnline();
-  });
-
   // 上传与校正
   $('fileInput').addEventListener('change', e => { handleUpload(e.target.files[0]); e.target.value = ''; });
   $('btnUpload').addEventListener('click', () => $('fileInput').click());

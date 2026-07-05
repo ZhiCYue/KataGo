@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#221a12" />
+  <meta name="theme-color" content="#1e2818" />
   <title>弈枰 · 围棋人机对弈</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css?v=20260705g" />
+  <link rel="stylesheet" href="css/style.css?v=20260705k" />
 </head>
 <body data-mode="game">
   <div class="grain"></div>
@@ -91,20 +91,16 @@
           <button data-tsumego-strength="pro">职业</button>
           <button data-tsumego-strength="custom">自定义</button>
         </div>
-        <div id="tsumegoCustom" class="tsumego-custom">
+        <div id="tsumegoCustom" class="visits-row">
           <input id="visitsRange" type="range" min="50" max="1600" step="50" value="220" />
           <span id="visitsVal" class="visits-val">220</span>
         </div>
-        <p class="note tiny">思考量（visits）越小应手越快、越大越强。参考：高阶 220，职业 900；100 以内约 1 秒应手。</p>
-      </section>
-
-      <section class="card tsumego-only">
-        <label class="card-label">找题 · 公开资源</label>
-        <div class="search-row">
-          <input id="tsumegoSearchInput" type="search" value="tsumego 高级死活题" />
-          <button id="btnTsumegoSearch" class="btn">搜索</button>
-        </div>
-        <div id="tsumegoSearchResults" class="search-results"></div>
+        <details class="visits-help">
+          <summary>什么是思考量（visits）？</summary>
+          <p>思考量是 KataGo 每手棋搜索的局面数，相当于它「读棋」的仔细程度：数值越大读得越深、棋力越强，耗时也大致成正比。
+          经验上思考量翻倍约提升一个小档。参考：50–100 应手最快、适合刷题热身；220（高阶）均衡；900（职业）接近职业判断。
+          对局与死活的思考量分开设置，互不影响。</p>
+        </details>
       </section>
 
       <section class="card game-only">
@@ -126,7 +122,18 @@
           <button data-engine="local" data-level="medium" class="active">进阶 · 本地</button>
           <button data-engine="katago" data-visits="120">高段 · KataGo</button>
           <button data-engine="katago" data-visits="1200">职业 · KataGo</button>
+          <button data-engine="katago" data-custom="1" class="span2">自定义思考量 · KataGo</button>
         </div>
+        <div id="gameCustom" class="visits-row">
+          <input id="gameVisitsRange" type="range" min="50" max="3200" step="50" value="400" />
+          <span id="gameVisitsVal" class="visits-val">400</span>
+        </div>
+        <details class="visits-help">
+          <summary>什么是思考量（visits）？</summary>
+          <p>思考量是 KataGo 每手棋搜索的局面数，相当于它「读棋」的仔细程度：数值越大读得越深、棋力越强，耗时也大致成正比。
+          经验上思考量翻倍约提升一个小档。参考：120（高段）业余高手，1200（职业）职业水准；再往上主要提升官子与复杂战斗的精度。
+          对局与死活的思考量分开设置，互不影响。</p>
+        </details>
       </section>
 
       <section class="card game-only">
@@ -156,13 +163,14 @@
       <button id="btnProblemHint" class="dock-btn"><span class="dock-glyph">✦</span>提示</button>
       <button id="btnProblemReset" class="dock-btn"><span class="dock-glyph">↺</span>重做</button>
       <button id="btnProblemRandom" class="dock-btn dock-main"><span>随</span></button>
+      <button id="btnTrialTsumego" class="dock-btn btn-trial"><span class="dock-glyph">演</span>推演</button>
       <button id="btnProblemNext" class="dock-btn"><span class="dock-glyph">→</span>下一题</button>
     </div>
     <div class="dock-inner game-only">
       <button id="btnHint" class="dock-btn"><span class="dock-glyph">✦</span>提示</button>
       <button id="btnPass" class="dock-btn"><span class="dock-glyph">〇</span>虚手</button>
       <button id="btnUndo" class="dock-btn"><span class="dock-glyph">↺</span>悔棋</button>
-      <button id="btnTrial" class="dock-btn"><span class="dock-glyph">演</span>推演</button>
+      <button id="btnTrial" class="dock-btn btn-trial"><span class="dock-glyph">演</span>推演</button>
       <button id="btnResign" class="dock-btn"><span class="dock-glyph">投</span>认输</button>
       <button id="btnNew" class="dock-btn"><span class="dock-glyph">新</span>新局</button>
     </div>
@@ -181,9 +189,9 @@
 
   <script src="js/engine.js?v=20260619"></script>
   <script src="js/ai.js?v=20260619"></script>
-  <script src="js/board.js?v=20260705g"></script>
-  <script src="js/tsumego-bank.js?v=20260705g"></script>
-  <script src="js/tsumego.js?v=20260705g"></script>
-  <script src="js/main.js?v=20260705g"></script>
+  <script src="js/board.js?v=20260705j"></script>
+  <script src="js/tsumego-bank.js?v=20260705j"></script>
+  <script src="js/tsumego.js?v=20260705j"></script>
+  <script src="js/main.js?v=20260705j"></script>
 </body>
 </html>

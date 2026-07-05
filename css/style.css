@@ -1,27 +1,28 @@
 /* ============================================================
- * 弈枰 · 水墨木质风格，移动优先
+ * 弈枰 · 竹青水墨风格，移动优先
  * 结构：顶栏（品牌+模式）→ 棋盘 → 题目卡/设置卡 → 底部行动坞
  * 桌面 ≥920px 恢复双栏，行动坞归位棋盘下方
+ * 配色：竹青纸底 + 墨竹深绿 + 朱砂点睛（印章/主按钮保持朱红）
  * ============================================================ */
 :root {
-  --ink: #211b14;
-  --ink-soft: #5b4f40;
-  --paper: #ece3d2;
-  --paper-2: #e0d4bc;
-  --panel: #f3ecdd;
-  --line: #cbbda1;
+  --ink: #232a1d;
+  --ink-soft: #5a6650;
+  --paper: #e4e9d5;
+  --paper-2: #d5dcc0;
+  --panel: #edf0df;
+  --line: #b9c4a0;
   --cinnabar: #b8402f;
   --cinnabar-d: #9c3324;
-  --gold: #b6924f;
-  --gold-l: #d8b878;
-  --lacquer: #221a12;
-  --lacquer-2: #302418;
-  --shadow: 30 18 6;
-  --dock-h: 76px;
+  --gold: #8a9a58;
+  --gold-l: #cdd99b;
+  --lacquer: #1e2818;
+  --lacquer-2: #2c3a24;
+  --shadow: 24 32 16;
+  --dock-h: 84px;
   --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 button, input, select { touch-action: manipulation; }
 
 body {
@@ -29,8 +30,8 @@ body {
   font-family: "Noto Serif SC", serif;
   color: var(--ink);
   background:
-    radial-gradient(130% 90% at 20% 0%, #f2ead9 0%, var(--paper) 48%, var(--paper-2) 100%);
-  padding-bottom: calc(var(--dock-h) + var(--safe-b) + 10px);
+    radial-gradient(130% 90% at 20% 0%, #edf1de 0%, var(--paper) 48%, var(--paper-2) 100%);
+  padding-bottom: calc(var(--dock-h) + var(--safe-b) + 18px);
 }
 
 /* 纸面颗粒 */
@@ -50,9 +51,9 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px 8px;
-  background: linear-gradient(180deg, rgba(243, 236, 221, 0.96), rgba(243, 236, 221, 0.88));
+  background: linear-gradient(180deg, rgba(237, 240, 223, 0.96), rgba(237, 240, 223, 0.88));
   backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(203, 189, 161, 0.55);
+  border-bottom: 1px solid rgba(185, 196, 160, 0.55);
   animation: fadeDown 0.5s both;
 }
 .brand-mark {
@@ -70,8 +71,8 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 }
 .mode-tabs {
   display: flex; gap: 4px; padding: 4px;
-  background: rgba(33, 27, 20, 0.06);
-  border: 1px solid rgba(203, 189, 161, 0.6);
+  background: rgba(35, 42, 29, 0.07);
+  border: 1px solid rgba(185, 196, 160, 0.6);
   border-radius: 999px;
 }
 .mode-tabs button {
@@ -135,6 +136,11 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 #board {
   display: block; width: 100%; aspect-ratio: 1; border-radius: 4px;
   cursor: pointer; touch-action: manipulation;
+  /* 手机落子时不要出现整盘的点按高亮/长按选中遮罩 */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* —— 印章（正解 / 再思）—— */
@@ -164,11 +170,11 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .seal.fail {
   background:
     radial-gradient(closest-side at 32% 30%, rgba(255, 255, 255, 0.1), transparent 70%),
-    linear-gradient(155deg, #4c4238, #2c251d);
+    linear-gradient(155deg, #47523a, #27301e);
   box-shadow:
-    0 0 0 3px rgba(236, 227, 210, 0.7) inset,
-    0 0 0 7px rgba(33, 27, 20, 0.4) inset,
-    0 14px 34px -10px rgba(20, 14, 8, 0.6);
+    0 0 0 3px rgba(228, 233, 213, 0.7) inset,
+    0 0 0 7px rgba(30, 40, 24, 0.4) inset,
+    0 14px 34px -10px rgba(14, 20, 10, 0.6);
 }
 @keyframes stamp {
   0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-16deg) scale(1.9); }
@@ -189,7 +195,7 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .problem-judge {
   margin-top: 7px; padding: 6px 9px;
   font-size: 13px; font-weight: 600; color: var(--ink);
-  background: rgba(182, 146, 79, 0.12);
+  background: rgba(138, 154, 88, 0.14);
   border-left: 3px solid var(--gold); border-radius: 0 5px 5px 0;
 }
 .problem-judge:empty { display: none; }
@@ -232,6 +238,7 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
   box-shadow: 0 4px 12px -4px rgba(var(--shadow), 0.6);
 }
 .seg.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seg .span2 { grid-column: 1 / -1; }
 .seg.sm button { padding: 7px 0; font-size: 13px; min-width: 44px; }
 
 .btn {
@@ -250,10 +257,10 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .btn.ghost { background: none; border-style: dashed; color: var(--ink-soft); }
 .btn.full { width: 100%; }
 
-/* —— 死活自定义思考量 —— */
-.tsumego-custom { display: none; align-items: center; gap: 12px; margin-top: 10px; }
-.tsumego-custom.show { display: flex; }
-.tsumego-custom input[type="range"] {
+/* —— 自定义思考量（对局 / 死活共用）—— */
+.visits-row { display: none; align-items: center; gap: 12px; margin-top: 10px; }
+.visits-row.show { display: flex; }
+.visits-row input[type="range"] {
   flex: 1; min-width: 0;
   accent-color: var(--cinnabar);
   touch-action: pan-x;   /* 手机上滑杆横向拖动，不触发页面滚动 */
@@ -262,6 +269,20 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
   min-width: 52px; text-align: right;
   font-family: "Cormorant Garamond", serif;
   font-size: 19px; font-weight: 600; color: var(--cinnabar-d);
+}
+/* —— 思考量概念说明（可折叠）—— */
+.visits-help { margin-top: 10px; font-size: 12px; color: var(--ink-soft); }
+.visits-help summary {
+  cursor: pointer; user-select: none;
+  color: var(--gold); font-weight: 600; letter-spacing: 0.06em;
+  list-style-position: inside;
+}
+.visits-help summary:hover { color: var(--cinnabar-d); }
+.visits-help p { margin: 7px 0 0; line-height: 1.75; }
+.visits-help[open] {
+  padding: 9px 11px; border-radius: 6px;
+  background: rgba(138, 154, 88, 0.1);
+  border: 1px solid rgba(138, 154, 88, 0.3);
 }
 
 /* —— 题库控件 —— */
@@ -282,28 +303,6 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 }
 .problem-jump .btn { padding: 10px 10px; font-size: 13px; white-space: nowrap; }
 .problem-count { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
-
-/* —— 在线搜索 —— */
-.search-row { display: grid; grid-template-columns: 1fr 68px; gap: 7px; }
-.search-row input {
-  min-width: 0; padding: 10px 9px;
-  font-family: inherit; font-size: 13px; color: var(--ink);
-  background: rgba(255, 255, 255, 0.45);
-  border: 1px solid var(--line); border-radius: 6px;
-}
-.search-row .btn { padding: 10px 6px; }
-.search-results { margin-top: 8px; display: grid; gap: 6px; }
-.search-results a,
-.search-results .search-note {
-  display: block; padding: 8px 9px;
-  border: 1px solid var(--line); border-radius: 6px;
-  background: rgba(255, 255, 255, 0.28);
-  font-size: 12px; line-height: 1.35;
-}
-.search-results a { color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
-.search-results a:hover { border-color: var(--gold); color: var(--cinnabar-d); }
-.search-results .search-url { display: block; margin-top: 3px; color: var(--ink-soft); font-size: 10px; }
-.search-results .search-note { color: var(--ink-soft); }
 
 /* —— 胜率条 —— */
 .winrate { background: rgba(255, 255, 255, 0.3); border: 1px solid var(--line); border-radius: 6px; padding: 11px 12px; }
@@ -332,14 +331,18 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .note.tiny { font-size: 11px; margin-top: 6px; }
 
 /* ============================================================
- * 行动坞：移动端固定底部（黑漆 + 描金）
+ * 行动坞：悬浮胶囊（墨竹漆 + 竹黄描边），移动/桌面统一
  * ============================================================ */
 .dock {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  padding: 8px 10px calc(8px + var(--safe-b));
+  position: fixed; left: 10px; right: 10px; bottom: calc(10px + var(--safe-b)); z-index: 30;
+  padding: 7px 8px;
   background: linear-gradient(180deg, var(--lacquer-2), var(--lacquer));
-  border-top: 1px solid rgba(216, 184, 120, 0.28);
-  box-shadow: 0 -14px 34px -16px rgba(20, 12, 4, 0.55);
+  border: 1px solid rgba(205, 217, 155, 0.24);
+  border-radius: 22px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 20px 44px -18px rgba(12, 18, 8, 0.75),
+    0 4px 14px -6px rgba(12, 18, 8, 0.4);
   animation: dockUp 0.5s 0.2s both;
 }
 .dock-inner {
@@ -348,49 +351,53 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 }
 .dock-btn {
   flex: 1; min-height: 56px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  font-family: inherit; font-size: 12px; letter-spacing: 0.14em; text-indent: 0.14em;
-  color: #c9b48a;
-  background: none; border: none; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  font-family: inherit; font-size: 11.5px; letter-spacing: 0.12em; text-indent: 0.12em;
+  color: #a8b586;
+  background: none; border: none; border-radius: 15px;
   cursor: pointer; transition: 0.18s;
   -webkit-tap-highlight-color: transparent;
 }
-.dock-btn:active { transform: scale(0.94); background: rgba(216, 184, 120, 0.1); }
+.dock-btn:hover { color: var(--gold-l); }
+.dock-btn:active { transform: scale(0.93); background: rgba(205, 217, 155, 0.1); }
 .dock-btn.on {
-  color: #f2dfb7;
-  background: rgba(216, 184, 120, 0.16);
-  box-shadow: 0 0 0 1px rgba(216, 184, 120, 0.4) inset;
+  color: #eef3d3;
+  background: rgba(205, 217, 155, 0.16);
+  box-shadow: 0 0 0 1px rgba(205, 217, 155, 0.4) inset;
 }
-.dock-glyph { font-size: 19px; line-height: 1; color: var(--gold-l); }
+.dock-glyph { font-size: 19px; line-height: 1; color: var(--gold-l); transition: 0.18s; }
+.dock-btn:hover .dock-glyph { transform: translateY(-1px); }
 .dock-main {
   flex: 0 0 auto;
-  width: 62px; min-height: 62px; align-self: center;
-  margin-top: -22px;
+  width: 64px; min-height: 64px; align-self: center;
+  margin-top: -26px;
   font-family: "Ma Shan Zheng", "Noto Serif SC", serif;
-  font-size: 30px; letter-spacing: 0; text-indent: 0;
+  font-size: 31px; letter-spacing: 0; text-indent: 0;
   color: #f8ecd8;
   background:
-    radial-gradient(closest-side at 32% 28%, rgba(255, 255, 255, 0.2), transparent 68%),
+    radial-gradient(closest-side at 32% 28%, rgba(255, 255, 255, 0.22), transparent 68%),
     linear-gradient(160deg, #c24a35, #8e2718);
-  border: 2px solid rgba(246, 232, 212, 0.75);
+  border: 2px solid rgba(246, 232, 212, 0.78);
   border-radius: 50%;
   box-shadow:
     0 0 0 5px var(--lacquer),
-    0 10px 24px -6px rgba(140, 35, 20, 0.7);
+    0 0 0 6px rgba(205, 217, 155, 0.25),
+    0 12px 26px -6px rgba(120, 32, 18, 0.65);
 }
+.dock-main:hover { filter: brightness(1.07); }
 .dock-main:active { transform: scale(0.92); }
 
 /* —— 轻提示（浮在坞上方）—— */
 .message {
-  position: fixed; left: 50%; bottom: calc(var(--dock-h) + var(--safe-b) + 14px); z-index: 40;
+  position: fixed; left: 50%; bottom: calc(var(--dock-h) + var(--safe-b) + 22px); z-index: 40;
   transform: translate(-50%, 8px);
   max-width: min(92vw, 460px);
   padding: 9px 16px;
-  font-size: 13px; letter-spacing: 0.04em; color: #f6efdf; text-align: center;
-  background: rgba(33, 27, 20, 0.92);
-  border: 1px solid rgba(216, 184, 120, 0.35);
+  font-size: 13px; letter-spacing: 0.04em; color: #eef3da; text-align: center;
+  background: rgba(30, 40, 24, 0.93);
+  border: 1px solid rgba(205, 217, 155, 0.35);
   border-radius: 999px;
-  box-shadow: 0 12px 30px -10px rgba(20, 12, 4, 0.6);
+  box-shadow: 0 12px 30px -10px rgba(12, 18, 8, 0.6);
   opacity: 0; pointer-events: none;
   transition: 0.28s;
 }
@@ -446,7 +453,7 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
  * 桌面端 ≥920px：双栏，行动坞归位棋盘下方
  * ============================================================ */
 @media (min-width: 920px) {
-  body { padding-bottom: calc(var(--dock-h) + 30px); }
+  body { padding-bottom: calc(var(--dock-h) + 34px); }
   .topbar { padding: 14px 34px 10px; }
   .brand-mark { font-size: 36px; }
   .layout {
@@ -459,11 +466,8 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
     left: 50%; right: auto; bottom: 16px;
     width: min(640px, calc(100vw - 48px));
     transform: translateX(-50%);
-    border-radius: 16px;
-    border: 1px solid rgba(216, 184, 120, 0.3);
     padding: 8px 12px;
     animation: none;
   }
-  .dock-main { margin-top: -26px; }
-  .message { bottom: calc(var(--dock-h) + 34px); }
+  .message { bottom: calc(var(--dock-h) + 38px); }
 }
