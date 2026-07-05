@@ -356,6 +356,11 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
   -webkit-tap-highlight-color: transparent;
 }
 .dock-btn:active { transform: scale(0.94); background: rgba(216, 184, 120, 0.1); }
+.dock-btn.on {
+  color: #f2dfb7;
+  background: rgba(216, 184, 120, 0.16);
+  box-shadow: 0 0 0 1px rgba(216, 184, 120, 0.4) inset;
+}
 .dock-glyph { font-size: 19px; line-height: 1; color: var(--gold-l); }
 .dock-main {
   flex: 0 0 auto;

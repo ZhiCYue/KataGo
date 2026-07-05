@@ -15,6 +15,7 @@ const state = {
   komi: 7.5,
   thinking: false,
   epoch: 0,               // 局面代数：换题/新局时 +1，用于丢弃迟到的 AI 回包
+  trial: null,            // 推演模式快照：{ moveNumber, movesLen, aiSide }；null 表示未在推演
   moves: [],              // 当前局面之后下出的着手 [["B","Q16"],...]
   setupStones: [],        // 起始布局（来自上传识别）发给 KataGo 的 initialStones
   initialPlayer: 'B',     // 起始布局轮到谁走（moves 从该方起算）
@@ -76,6 +77,7 @@ function pushPass() {
 function newGame() {
   state.mode = 'game';
   state.epoch++;
+  exitTrialSilently();
   state.puzzleSolved = false;
   state.game = new GoGame(state.boardSize);
   state.moves = [];
@@ -160,6 +162,7 @@ function doPass() {
 function doUndo() {
   if (state.mode === 'tsumego') { resetProblem(); return; }
   if (state.thinking || state.editing) return;
+  if (state.trial && state.game.moveNumber <= state.trial.moveNumber) { flash('已在推演起点'); return; }
   let n = 0;
   if (state.game.undo()) n++;
   // 若悔棋后仍轮到 AI 方，再退一手回到自己
@@ -198,10 +201,51 @@ function doHint() {
 
 function doResign() {
   if (state.game.gameOver || state.editing) return;
+  if (state.trial) { flash('推演中——先点「推演」返回实战再认输'); return; }
   // 认输方：不托管时为当前走子方，否则为人类执的一方
   const loser = state.aiSide === 0 ? state.game.turn : (state.aiSide === 1 ? 2 : 1);
   state.game.gameOver = true;
   endGame(`${loser === 1 ? '黑' : '白'}方认输 · ${loser === 1 ? '白' : '黑'}胜`, true);
+}
+
+/* ============================================================
+ * 推演模式：对局中切入，黑白都手动摆（AI 暂停）；
+ * 再次切换时回滚到切入前的局面并恢复 AI 执方
+ * ============================================================ */
+function toggleTrial() {
+  if (state.mode !== 'game' || state.editing || state.game.gameOver) return;
+  if (!state.trial) {
+    state.epoch++;                     // 丢弃在途的 AI 回包，避免它落进推演局面
+    state.thinking = false;
+    state.view.interactive = true;
+    state.trial = { moveNumber: state.game.moveNumber, movesLen: state.moves.length, aiSide: state.aiSide };
+    state.aiSide = 0;
+    $('btnTrial').classList.add('on');
+    flash('推演开始：黑白都由你落子，再点「推演」回到当前局面');
+  } else {
+    const t = state.trial;
+    state.epoch++;
+    while (state.game.moveNumber > t.moveNumber && state.game.undo());
+    state.moves.length = Math.min(state.moves.length, t.movesLen);
+    state.aiSide = t.aiSide;
+    state.trial = null;
+    $('btnTrial').classList.remove('on');
+    setActive('[data-aiside]', document.querySelector(`[data-aiside="${state.aiSide}"]`));
+    state.view.hintMove = null;
+    state.view.draw();
+    flash('已回到推演前的局面，继续对局');
+    maybeAI();                         // 若轮到 AI 方，接着下
+  }
+  updateStatus();
+}
+
+function exitTrialSilently() {
+  // 换模式/新局时直接丢弃推演状态（局面随后会被重建，无需回滚）
+  if (!state.trial) return;
+  state.aiSide = state.trial.aiSide;
+  state.trial = null;
+  $('btnTrial').classList.remove('on');
+  setActive('[data-aiside]', document.querySelector(`[data-aiside="${state.aiSide}"]`));
 }
 
 /* ============================================================
@@ -220,6 +264,7 @@ function buildProblemBoard(problem) {
 
 function setMode(mode) {
   if (state.editing) exitEditMode();
+  exitTrialSilently();
   state.mode = mode;
   state.thinking = false;
   state.puzzleSolved = false;
@@ -577,6 +622,10 @@ function updateStatus() {
   }
   if (g.gameOver) { turnEl.innerHTML = '<span class="turn-label">对局结束</span>'; return; }
   const dot = `<span class="stone-dot ${g.turn === 1 ? 'black' : 'white'}"></span>`;
+  if (state.trial) {
+    turnEl.innerHTML = `${dot}<span class="turn-label">${g.turn === 1 ? '黑' : '白'}方 · 推演中（点「推演」返回实战）</span>`;
+    return;
+  }
   const who = !aiControlsTurn() ? '该你落子'
     : (state.thinking ? (state.engine === 'katago' ? 'KataGo 计算中…' : 'AI 思考中…') : 'AI 行棋');
   turnEl.innerHTML = `${dot}<span class="turn-label">${g.turn === 1 ? '黑' : '白'}方 · ${who}</span>`;
@@ -747,6 +796,7 @@ function bindControls() {
     btn.addEventListener('click', () => { setActive('[data-size]', btn); state.boardSize = +btn.dataset.size; newGame(); }));
   document.querySelectorAll('[data-aiside]').forEach(btn =>
     btn.addEventListener('click', () => {
+      if (state.trial) { flash('推演中不能切换 AI 执方，先点「推演」返回'); return; }
       setActive('[data-aiside]', btn);
       state.aiSide = +btn.dataset.aiside;
       updateStatus();
@@ -787,6 +837,7 @@ function bindControls() {
   $('btnPass').addEventListener('click', doPass);
   $('btnUndo').addEventListener('click', doUndo);
   $('btnHint').addEventListener('click', doHint);
+  $('btnTrial').addEventListener('click', toggleTrial);
   $('btnResign').addEventListener('click', doResign);
   $('btnProblemHint').addEventListener('click', showProblemHint);
   $('btnProblemReset').addEventListener('click', resetProblem);
