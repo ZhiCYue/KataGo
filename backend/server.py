@@ -15,8 +15,9 @@ KataGo 后端服务（零第三方依赖，仅用标准库）
   python3 backend/server.py --katago $(which katago) \
       --model models/kata-network.bin.gz --config backend/analysis.cfg --port 8001
 """
-import argparse, json, subprocess, threading, sys, queue, time, os
+import argparse, json, subprocess, threading, sys, queue, time, os, re, html
 import mimetypes, posixpath, urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +59,7 @@ class KataGo:
             sys.stderr.write("[katago] " + line)
 
     def query(self, moves, size, komi, rules, max_visits, want_ownership=False,
-              initial_stones=None, initial_player=None):
+              initial_stones=None, initial_player=None, allow_moves=None, avoid_moves=None):
         with self._lock:
             self._counter += 1
             qid = "q%d" % self._counter
@@ -81,6 +82,11 @@ class KataGo:
             req["initialStones"] = initial_stones
         if initial_player:
             req["initialPlayer"] = initial_player
+        if allow_moves:
+            req["allowMoves"] = allow_moves
+        # 死活训练：把题目区域外设为双方禁着点，让搜索聚焦局部
+        if avoid_moves:
+            req["avoidMoves"] = avoid_moves
         self.proc.stdin.write(json.dumps(req) + "\n")
         self.proc.stdin.flush()
         try:
@@ -186,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path.startswith("/api/"):
             return path[4:]                       # /api/recognize -> /recognize
-        if path in ("/health", "/position", "/recognize", "/genmove", "/analyze"):
+        if path in ("/health", "/position", "/recognize", "/genmove", "/analyze", "/tsumego-search"):
             return path                           # 兼容旧的无前缀路径
         return None
 
@@ -198,6 +204,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "katago": self.katago is not None})
         elif r == "/position":
             self._send(200, self.positions.get()) # PC 端轮询 / 刷新：取最新共享布局
+        elif r == "/tsumego-search":
+            self._handle_tsumego_search()
         else:
             self._send(404, {"error": "not found"})
 
@@ -262,6 +270,20 @@ class Handler(BaseHTTPRequestHandler):
         version = self.positions.set(size, board, turn, data.get("source", ""))
         return self._send(200, {"ok": True, "version": version})
 
+    def _handle_tsumego_search(self):
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        query = (params.get("q") or [""])[0].strip()
+        if not query:
+            query = "围棋 死活题 高级"
+        if len(query) > 80:
+            query = query[:80]
+        try:
+            results = search_tsumego_web(query)
+            return self._send(200, {"ok": True, "query": query, "results": results})
+        except Exception as e:
+            return self._send(502, {"error": "联网搜索失败：%s" % e})
+
     def _handle_katago(self, data, want_ownership=False):
         if self.katago is None:
             return self._send(503, {"error": "KataGo 未启用（后端以仅识别/同步模式运行）"})
@@ -273,17 +295,57 @@ class Handler(BaseHTTPRequestHandler):
         # 支持从上传布局继续：initialStones + initialPlayer（落子序列从该局面起算）
         initial_stones = data.get("initialStones")
         initial_player = data.get("initialPlayer")
+        allow_moves = data.get("allowMoves")
+        avoid_moves = data.get("avoidMoves")
+        # 前端可显式要求返回 ownership（如死活训练用它判定局部死活）
+        want_ownership = want_ownership or bool(data.get("includeOwnership"))
         base = initial_player if initial_player in ("B", "W") else "B"
         to_move = base if len(moves) % 2 == 0 else ("W" if base == "B" else "B")
 
         try:
             resp = self.katago.query(moves, size, komi, rules, max_visits, want_ownership,
-                                     initial_stones=initial_stones, initial_player=initial_player)
+                                     initial_stones=initial_stones, initial_player=initial_player,
+                                     allow_moves=allow_moves, avoid_moves=avoid_moves)
         except queue.Empty:
             return self._send(504, {"error": "katago timeout"})
         if "error" in resp:
             return self._send(500, {"error": resp["error"]})
         self._send(200, format_result(resp, to_move))
+
+
+def search_tsumego_web(query, limit=8):
+    """轻量联网搜索：用 Bing RSS 返回公开网页链接，不抓取或复制题面内容。"""
+    terms = query
+    if not re.search(r"tsumego", terms, re.I):
+        terms = "tsumego problems online " + terms
+    url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": terms, "format": "rss"})
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; KataGoPractice/1.0)",
+    })
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        raw = resp.read(512 * 1024).decode("utf-8", "replace")
+
+    results = []
+    seen = set()
+    pattern = re.compile(r"<item>\s*<title>(.*?)</title>\s*<link>(.*?)</link>", re.S)
+    for title_xml, href_xml in pattern.findall(raw):
+        title = html.unescape(re.sub(r"<.*?>", "", title_xml)).strip()
+        href = html.unescape(href_xml).strip()
+        if not title or not href.startswith(("http://", "https://")) or href in seen:
+            continue
+        seen.add(href)
+        results.append({"title": title[:120], "url": href})
+        if len(results) >= limit:
+            break
+    if not results:
+        encoded = urllib.parse.quote_plus(terms)
+        results = [
+            {"title": "Tsumego Hero", "url": "https://tsumego.com/"},
+            {"title": "goproblems.com", "url": "https://www.goproblems.com/"},
+            {"title": "Sensei's Library: Tsumego", "url": "https://senseis.xmp.net/?Tsumego"},
+            {"title": "Bing 搜索结果", "url": "https://www.bing.com/search?q=" + encoded},
+        ][:limit]
+    return results
 
 
 def main():

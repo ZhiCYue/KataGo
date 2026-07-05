@@ -1,5 +1,6 @@
 /* ============================================================
  * 棋盘渲染与交互（Canvas，高分屏适配）
+ * 支持视口（viewport）：死活训练时只显示题目所在的局部区域
  * ============================================================ */
 class BoardView {
   constructor(canvas, game, onPlay) {
@@ -12,15 +13,24 @@ class BoardView {
     this.showCoords = true;
     this.editMode = false;   // 校正模式：点击交叉点循环 空→黑→白
     this.onEdit = null;
+    this.viewport = null;    // {x0,y0,x1,y1} 只渲染该区域；null 为整盘
 
     canvas.addEventListener('mousemove', e => this.onMouseMove(e));
     canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
     canvas.addEventListener('click', e => this.onClick(e));
     window.addEventListener('resize', () => this.resize());
+    // resize 事件触发时布局未必已稳定（如媒体查询切换），用 ResizeObserver 兜底
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        if (this.canvas.clientWidth && this.canvas.clientWidth !== this.px) this.resize();
+      }).observe(canvas);
+    }
     this.resize();
   }
 
-  setGame(game) { this.game = game; this.hintMove = null; this.draw(); }
+  setGame(game) { this.game = game; this.hintMove = null; this.resize(); }
+
+  setViewport(vp) { this.viewport = vp || null; this.resize(); }
 
   resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -30,21 +40,31 @@ class BoardView {
     this.ctx = this.canvas.getContext('2d');
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.px = cssSize;
+    const n = this.game.size;
+    // 校正模式始终显示整盘；视口越界（换局面后）也回退整盘
+    let vp = (!this.editMode && this.viewport) || { x0: 0, y0: 0, x1: n - 1, y1: n - 1 };
+    if (vp.x1 >= n || vp.y1 >= n) vp = { x0: 0, y0: 0, x1: n - 1, y1: n - 1 };
+    this.vp = vp;
+    const cols = vp.x1 - vp.x0 + 1, rows = vp.y1 - vp.y0 + 1;
     this.margin = cssSize * (this.showCoords ? 0.064 : 0.045);
-    this.cell = (this.px - 2 * this.margin) / (this.game.size - 1);
+    this.cell = (this.px - 2 * this.margin) / (Math.max(cols, rows) - 1);
+    this.ox = (this.px - this.cell * (cols - 1)) / 2;
+    this.oy = (this.px - this.cell * (rows - 1)) / 2;
     this.draw();
   }
 
-  toPx(i) { return this.margin + i * this.cell; }
+  pxX(x) { return this.ox + (x - this.vp.x0) * this.cell; }
+  pxY(y) { return this.oy + (y - this.vp.y0) * this.cell; }
 
   fromEvent(e) {
     const r = this.canvas.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
-    const x = Math.round((px - this.margin) / this.cell);
-    const y = Math.round((py - this.margin) / this.cell);
+    const x = this.vp.x0 + Math.round((px - this.ox) / this.cell);
+    const y = this.vp.y0 + Math.round((py - this.oy) / this.cell);
     if (!this.game.inBounds(x, y)) return null;
+    if (x < this.vp.x0 || x > this.vp.x1 || y < this.vp.y0 || y > this.vp.y1) return null;
     // 命中范围限制在落点附近，避免边缘误触
-    if (Math.hypot(px - this.toPx(x), py - this.toPx(y)) > this.cell * 0.5) return null;
+    if (Math.hypot(px - this.pxX(x), py - this.pxY(y)) > this.cell * 0.5) return null;
     return { x, y };
   }
 
@@ -85,11 +105,15 @@ class BoardView {
     return res;
   }
 
+  inView(x, y) {
+    return x >= this.vp.x0 && x <= this.vp.x1 && y >= this.vp.y0 && y <= this.vp.y1;
+  }
+
   draw() {
-    const ctx = this.ctx, n = this.game.size, S = this.px;
-    ctx.clearRect(0, 0, S, S);
+    const ctx = this.ctx, S = this.px, vp = this.vp;
 
     // —— 木纹棋盘底 ——
+    ctx.clearRect(0, 0, S, S);
     const grad = ctx.createLinearGradient(0, 0, S, S);
     grad.addColorStop(0, '#e7c184');
     grad.addColorStop(0.5, '#dcab63');
@@ -109,45 +133,62 @@ class BoardView {
     ctx.globalAlpha = 1;
 
     // —— 网格 ——
+    // 视口边不是真实棋盘边时，网格线向外多画一段，示意棋盘在此方向延续
+    const n = this.game.size;
+    const bleed = this.cell * 0.6;
+    const xa = vp.x0 === 0 ? this.pxX(0) : this.pxX(vp.x0) - bleed;
+    const xb = vp.x1 === n - 1 ? this.pxX(n - 1) : this.pxX(vp.x1) + bleed;
+    const ya = vp.y0 === 0 ? this.pxY(0) : this.pxY(vp.y0) - bleed;
+    const yb = vp.y1 === n - 1 ? this.pxY(n - 1) : this.pxY(vp.y1) + bleed;
     ctx.strokeStyle = 'rgba(60,40,18,0.85)';
     ctx.lineWidth = 1;
-    const a = this.toPx(0), b = this.toPx(n - 1);
-    for (let i = 0; i < n; i++) {
-      const p = this.toPx(i);
-      ctx.beginPath(); ctx.moveTo(a, p); ctx.lineTo(b, p); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(p, a); ctx.lineTo(p, b); ctx.stroke();
+    for (let y = vp.y0; y <= vp.y1; y++) {
+      const p = this.pxY(y);
+      ctx.beginPath(); ctx.moveTo(xa, p); ctx.lineTo(xb, p); ctx.stroke();
     }
+    for (let x = vp.x0; x <= vp.x1; x++) {
+      const p = this.pxX(x);
+      ctx.beginPath(); ctx.moveTo(p, ya); ctx.lineTo(p, yb); ctx.stroke();
+    }
+    // 真实棋盘边加粗
+    ctx.lineWidth = 2;
+    if (vp.x0 === 0) { ctx.beginPath(); ctx.moveTo(this.pxX(0), ya); ctx.lineTo(this.pxX(0), yb); ctx.stroke(); }
+    if (vp.x1 === n - 1) { ctx.beginPath(); ctx.moveTo(this.pxX(n - 1), ya); ctx.lineTo(this.pxX(n - 1), yb); ctx.stroke(); }
+    if (vp.y0 === 0) { ctx.beginPath(); ctx.moveTo(xa, this.pxY(0)); ctx.lineTo(xb, this.pxY(0)); ctx.stroke(); }
+    if (vp.y1 === n - 1) { ctx.beginPath(); ctx.moveTo(xa, this.pxY(n - 1)); ctx.lineTo(xb, this.pxY(n - 1)); ctx.stroke(); }
+    ctx.lineWidth = 1;
 
     // —— 星位 ——
     ctx.fillStyle = 'rgba(50,32,14,0.9)';
     for (const [sx, sy] of this.starPoints()) {
+      if (!this.inView(sx, sy)) continue;
       ctx.beginPath();
-      ctx.arc(this.toPx(sx), this.toPx(sy), this.cell * 0.07, 0, Math.PI * 2);
+      ctx.arc(this.pxX(sx), this.pxY(sy), this.cell * 0.07, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // —— 坐标 ——
     if (this.showCoords) {
       ctx.fillStyle = 'rgba(70,48,22,0.75)';
-      ctx.font = `${Math.max(9, this.cell * 0.32)}px "Cormorant Garamond", serif`;
+      ctx.font = `${Math.max(9, Math.min(this.cell * 0.32, 15))}px "Cormorant Garamond", serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const letters = 'ABCDEFGHJKLMNOPQRST';
-      for (let i = 0; i < n; i++) {
-        ctx.fillText(letters[i], this.toPx(i), this.margin * 0.45);
-        ctx.fillText(String(n - i), this.margin * 0.45, this.toPx(i));
-      }
+      const ty = Math.max(9, this.oy - this.cell * 0.62);
+      const tx = Math.max(9, this.ox - this.cell * 0.62);
+      for (let x = vp.x0; x <= vp.x1; x++) ctx.fillText(letters[x], this.pxX(x), ty);
+      for (let y = vp.y0; y <= vp.y1; y++) ctx.fillText(String(n - y), tx, this.pxY(y));
     }
 
     // —— 棋子 ——
-    for (let y = 0; y < n; y++)
-      for (let x = 0; x < n; x++)
+    for (let y = vp.y0; y <= vp.y1; y++)
+      for (let x = vp.x0; x <= vp.x1; x++)
         if (this.game.board[y][x]) this.drawStone(x, y, this.game.board[y][x], 1);
 
     // —— 最后一手标记 ——
     const lm = this.game.lastMove;
-    if (lm && !lm.pass) {
+    if (lm && !lm.pass && this.inView(lm.x, lm.y)) {
       ctx.beginPath();
-      ctx.arc(this.toPx(lm.x), this.toPx(lm.y), this.cell * 0.16, 0, Math.PI * 2);
+      ctx.arc(this.pxX(lm.x), this.pxY(lm.y), this.cell * 0.16, 0, Math.PI * 2);
       ctx.fillStyle = lm.color === 1 ? '#efe7d6' : '#1a1714';
       ctx.fill();
     }
@@ -156,9 +197,9 @@ class BoardView {
     if (this.hover) this.drawStone(this.hover.x, this.hover.y, this.game.turn, 0.4);
 
     // —— 提示标记（朱砂圈）——
-    if (this.hintMove) {
+    if (this.hintMove && this.inView(this.hintMove.x, this.hintMove.y)) {
       ctx.beginPath();
-      ctx.arc(this.toPx(this.hintMove.x), this.toPx(this.hintMove.y), this.cell * 0.42, 0, Math.PI * 2);
+      ctx.arc(this.pxX(this.hintMove.x), this.pxY(this.hintMove.y), this.cell * 0.42, 0, Math.PI * 2);
       ctx.strokeStyle = '#b8402f';
       ctx.lineWidth = 2.5;
       ctx.stroke();
@@ -166,7 +207,7 @@ class BoardView {
   }
 
   drawStone(x, y, color, alpha) {
-    const ctx = this.ctx, cx = this.toPx(x), cy = this.toPx(y), r = this.cell * 0.46;
+    const ctx = this.ctx, cx = this.pxX(x), cy = this.pxY(y), r = this.cell * 0.46;
     ctx.save();
     ctx.globalAlpha = alpha;
     if (alpha === 1) {

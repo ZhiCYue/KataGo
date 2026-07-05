@@ -2,22 +2,45 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#221a12" />
   <title>弈枰 · 围棋人机对弈</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css?v=20260619" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=20260705d" />
 </head>
-<body>
+<body data-mode="game">
   <div class="grain"></div>
+
+  <!-- 顶栏：品牌 + 模式切换 -->
+  <header class="topbar">
+    <div class="brand-mark">弈枰<i class="brand-seal"></i></div>
+    <nav class="mode-tabs">
+      <button data-mode="game" class="active">对局</button>
+      <button data-mode="tsumego">死活</button>
+    </nav>
+  </header>
+
   <main class="layout">
-    <!-- 棋盘区 -->
-    <section class="board-wrap">
+    <!-- 棋盘列 -->
+    <section class="board-col">
+      <div id="turnIndicator" class="turn"></div>
+
       <div class="board-frame">
         <canvas id="board"></canvas>
+        <div id="seal" class="seal"></div>
       </div>
-      <div id="message" class="message"></div>
+
+      <!-- 题目卡（死活） -->
+      <div class="problem-card tsumego-only">
+        <div class="problem-head">
+          <div id="problemTitle" class="problem-title">点「随机」开始</div>
+          <div id="problemGoal" class="problem-goal"></div>
+        </div>
+        <div id="problemJudge" class="problem-judge"></div>
+        <p id="problemNote" class="note tiny"></p>
+      </div>
 
       <!-- 上传识别后的人工校正条 -->
       <div id="editPanel" class="edit-panel">
@@ -45,58 +68,63 @@
       </div>
     </section>
 
-    <!-- 控制面板 -->
+    <!-- 侧栏 / 移动端为下方卡片流 -->
     <aside class="panel">
-      <header class="brand">
-        <div class="brand-mark">弈<span>枰</span></div>
-        <div class="brand-sub">围棋 · 人机对弈</div>
-      </header>
-
-      <div id="turnIndicator" class="turn"></div>
-
-      <div class="stats">
+      <div class="stats game-only">
         <div class="stat"><span class="stat-num" id="moveNum">0</span><span class="stat-lab">手数</span></div>
         <div class="stat"><span class="stat-num" id="capBlack">0</span><span class="stat-lab">黑提子</span></div>
         <div class="stat"><span class="stat-num" id="capWhite">0</span><span class="stat-lab">白提子</span></div>
       </div>
 
-      <div class="field">
-        <label>棋盘</label>
+      <section class="card tsumego-only" id="tsumegoPanel">
+        <label class="card-label">题库</label>
+        <select id="tsumegoCollection" class="tsumego-select"></select>
+        <div class="problem-jump">
+          <button id="btnProblemPrev" class="btn">上一题</button>
+          <input id="problemIndexInput" type="number" min="1" placeholder="题号" />
+          <span id="problemCount" class="problem-count">/ —</span>
+          <button id="btnProblemGo" class="btn">跳转</button>
+        </div>
+        <label class="card-label gap-top">对手强度</label>
+        <div class="seg tsumego-strength">
+          <button data-tsumego-strength="advanced" class="active">高阶</button>
+          <button data-tsumego-strength="pro">职业</button>
+        </div>
+      </section>
+
+      <section class="card tsumego-only">
+        <label class="card-label">找题 · 公开资源</label>
+        <div class="search-row">
+          <input id="tsumegoSearchInput" type="search" value="tsumego 高级死活题" />
+          <button id="btnTsumegoSearch" class="btn">搜索</button>
+        </div>
+        <div id="tsumegoSearchResults" class="search-results"></div>
+      </section>
+
+      <section class="card game-only">
+        <label class="card-label">棋盘</label>
         <div class="seg">
           <button data-size="9">9 路</button>
           <button data-size="13">13 路</button>
           <button data-size="19" class="active">19 路</button>
         </div>
-      </div>
-
-      <div class="field">
-        <label>AI 执方</label>
+        <label class="card-label gap-top">AI 执方</label>
         <div class="seg">
           <button data-aiside="0">不托管</button>
           <button data-aiside="1">AI 执黑</button>
           <button data-aiside="2" class="active">AI 执白</button>
         </div>
-      </div>
-
-      <div class="field">
-        <label>导入布局</label>
-        <button id="btnUpload" class="btn accent full">📷 上传截图识别棋盘</button>
-        <input id="fileInput" type="file" accept="image/*" hidden />
-        <p class="note tiny">手机上传识别后会同步，PC 端自动载入。</p>
-      </div>
-
-      <div class="field">
-        <label>对手强度</label>
+        <label class="card-label gap-top">对手强度</label>
         <div class="seg grid2">
           <button data-engine="local" data-level="beginner">入门 · 本地</button>
           <button data-engine="local" data-level="medium" class="active">进阶 · 本地</button>
           <button data-engine="katago" data-visits="120">高段 · KataGo</button>
           <button data-engine="katago" data-visits="1200">职业 · KataGo</button>
         </div>
-      </div>
+      </section>
 
-      <div class="field">
-        <label>胜率 · 形势</label>
+      <section class="card game-only">
+        <label class="card-label">胜率 · 形势</label>
         <div class="winrate">
           <div class="wr-bar"><div id="wrFill" class="wr-fill"></div></div>
           <div class="wr-row">
@@ -105,19 +133,36 @@
             <span><b id="wrWhite">50%</b><i class="wr-dot white"></i></span>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="actions">
-        <button id="btnHint" class="btn accent">智能提示</button>
-        <button id="btnPass" class="btn">虚手</button>
-        <button id="btnUndo" class="btn">悔棋</button>
-        <button id="btnResign" class="btn">认输</button>
-        <button id="btnNew" class="btn ghost">新对局</button>
-      </div>
-
-      <p class="note">本地启发式 AI。后续可接入 KataGo 后端，获得真正的胜率与形势分析。</p>
+      <section class="card game-only">
+        <label class="card-label">导入布局</label>
+        <button id="btnUpload" class="btn accent full">📷 上传截图识别棋盘</button>
+        <input id="fileInput" type="file" accept="image/*" hidden />
+        <p class="note tiny">手机上传识别后会同步，PC 端自动载入。</p>
+      </section>
     </aside>
   </main>
+
+  <!-- 行动坞：移动端固定底部，桌面端归位棋盘下方 -->
+  <nav class="dock">
+    <div class="dock-inner tsumego-only">
+      <button id="btnProblemHint" class="dock-btn"><span class="dock-glyph">✦</span>提示</button>
+      <button id="btnProblemReset" class="dock-btn"><span class="dock-glyph">↺</span>重做</button>
+      <button id="btnProblemRandom" class="dock-btn dock-main"><span>随</span></button>
+      <button id="btnProblemNext" class="dock-btn"><span class="dock-glyph">→</span>下一题</button>
+    </div>
+    <div class="dock-inner game-only">
+      <button id="btnHint" class="dock-btn"><span class="dock-glyph">✦</span>提示</button>
+      <button id="btnPass" class="dock-btn"><span class="dock-glyph">〇</span>虚手</button>
+      <button id="btnUndo" class="dock-btn"><span class="dock-glyph">↺</span>悔棋</button>
+      <button id="btnResign" class="dock-btn"><span class="dock-glyph">投</span>认输</button>
+      <button id="btnNew" class="dock-btn"><span class="dock-glyph">新</span>新局</button>
+    </div>
+  </nav>
+
+  <!-- 轻提示 -->
+  <div id="message" class="message"></div>
 
   <!-- 终局结果 -->
   <div id="result" class="result">
@@ -129,7 +174,9 @@
 
   <script src="js/engine.js?v=20260619"></script>
   <script src="js/ai.js?v=20260619"></script>
-  <script src="js/board.js?v=20260619"></script>
-  <script src="js/main.js?v=20260619"></script>
+  <script src="js/board.js?v=20260705d"></script>
+  <script src="js/tsumego-bank.js?v=20260705d"></script>
+  <script src="js/tsumego.js?v=20260705d"></script>
+  <script src="js/main.js?v=20260705d"></script>
 </body>
 </html>

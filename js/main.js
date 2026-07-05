@@ -6,6 +6,7 @@ const LETTERS = 'ABCDEFGHJKLMNOPQRST';
 const state = {
   game: null,
   view: null,
+  mode: 'game',           // 'game' 对局 | 'tsumego' 死活练习
   boardSize: 19,
   aiSide: 2,              // AI 执方：0 不托管 / 1 黑 / 2 白（默认 AI 执白，人执黑）
   engine: 'local',        // 'local' 本地启发式 | 'katago' 神经网络
@@ -13,6 +14,7 @@ const state = {
   kataVisits: 200,        // KataGo 算力（越大越强）
   komi: 7.5,
   thinking: false,
+  epoch: 0,               // 局面代数：换题/新局时 +1，用于丢弃迟到的 AI 回包
   moves: [],              // 当前局面之后下出的着手 [["B","Q16"],...]
   setupStones: [],        // 起始布局（来自上传识别）发给 KataGo 的 initialStones
   initialPlayer: 'B',     // 起始布局轮到谁走（moves 从该方起算）
@@ -26,6 +28,10 @@ const state = {
   editGame: null,
   editTurn: 1,
   pendingImage: null,     // 待识别的图片 dataURL（切换路数时复用）
+  // 死活练习
+  tsumego: { collection: 'cho-3', index: 0, problem: null },
+  tsumegoStrength: 'advanced',
+  puzzleSolved: false,
 };
 
 const $ = id => document.getElementById(id);
@@ -34,13 +40,24 @@ function fromVertex(v) {
   if (v === 'pass') return null;
   return { x: LETTERS.indexOf(v[0].toUpperCase()), y: state.boardSize - parseInt(v.slice(1), 10) };
 }
+function pointFromVertex(v, size = state.boardSize) {
+  if (!v || v === 'pass') return null;
+  return { x: LETTERS.indexOf(v[0].toUpperCase()), y: size - parseInt(v.slice(1), 10) };
+}
 
 /* —— 轮走判定 —— */
 function aiControlsTurn() { return state.aiSide !== 0 && state.game.turn === state.aiSide; }
 function humanTurnNow() {
+  if (state.mode === 'tsumego') {
+    const p = currentProblem();
+    return !state.editing && !state.thinking && !state.game.gameOver && p && state.game.turn === 1;
+  }
   return !state.editing && !state.thinking && !state.game.gameOver && !aiControlsTurn();
 }
-function maybeAI() { if (!state.game.gameOver && aiControlsTurn()) scheduleAI(); }
+function maybeAI() {
+  if (state.mode !== 'game') return;
+  if (!state.game.gameOver && aiControlsTurn()) scheduleAI();
+}
 
 /* —— 落子封装：同步维护发给 KataGo 的着手序列 —— */
 function pushPlay(x, y) {
@@ -56,21 +73,27 @@ function pushPass() {
 }
 
 function newGame() {
+  state.mode = 'game';
+  state.epoch++;
+  state.puzzleSolved = false;
   state.game = new GoGame(state.boardSize);
   state.moves = [];
   state.setupStones = [];
   state.initialPlayer = 'B';
-  if (state.view) state.view.setGame(state.game);
+  if (state.view) { state.view.viewport = null; state.view.setGame(state.game); }
   else { state.view = new BoardView($('board'), state.game, handleHumanPlay); state.view.onEdit = onEditChange; }
   state.thinking = false;
+  hideSeal();
   $('result').classList.remove('show');
   updateWinrate(0.5, 0);
+  updateModeUI();
   updateStatus();
   maybeAI(); // 若 AI 执黑则先行
 }
 
 function handleHumanPlay(x, y) {
   if (!humanTurnNow()) return;
+  if (state.mode === 'tsumego') { handleProblemPlay(x, y); return; }
   const res = pushPlay(x, y);
   if (!res.legal) { flash(reasonText(res.reason)); return; }
   state.view.hintMove = null;
@@ -80,6 +103,7 @@ function handleHumanPlay(x, y) {
 
 function scheduleAI() {
   if (state.game.gameOver) return;
+  const ep = state.epoch;   // 回包时局面已换（新局/换题）则丢弃
   state.thinking = true;
   state.view.interactive = false;
   updateStatus();
@@ -87,18 +111,24 @@ function scheduleAI() {
   if (state.engine === 'katago') {
     kataQuery('/genmove', state.kataVisits)
       .then(r => {
+        if (state.epoch !== ep) return;
         const mv = fromVertex(r.bestMove);
         if (mv) pushPlay(mv.x, mv.y); else pushPass();
         updateWinrate(r.winrate, r.scoreLead);
       })
       .catch(err => {
+        if (state.epoch !== ep) return;
         console.warn(err);
         flash('KataGo 后端未连接，本手改用本地 AI');
         localAIMove('medium');
       })
-      .finally(() => { state.thinking = false; state.view.interactive = true; afterMove(); maybeAI(); });
+      .finally(() => {
+        if (state.epoch !== ep) return;
+        state.thinking = false; state.view.interactive = true; afterMove(); maybeAI();
+      });
   } else {
     setTimeout(() => {
+      if (state.epoch !== ep) return;
       localAIMove(state.level);
       state.thinking = false;
       state.view.interactive = true;
@@ -127,6 +157,7 @@ function doPass() {
 }
 
 function doUndo() {
+  if (state.mode === 'tsumego') { resetProblem(); return; }
   if (state.thinking || state.editing) return;
   let n = 0;
   if (state.game.undo()) n++;
@@ -143,10 +174,13 @@ function doUndo() {
 
 function doHint() {
   if (!humanTurnNow()) return;
+  if (state.mode === 'tsumego') { showProblemHint(); return; }
   if (state.engine === 'katago') {
+    const ep = state.epoch;
     flash('分析中…');
     kataQuery('/analyze', Math.max(state.kataVisits, 300))
       .then(r => {
+        if (state.epoch !== ep) return;
         const mv = fromVertex(r.bestMove);
         if (mv) { state.view.hintMove = mv; state.view.draw(); }
         updateWinrate(r.winrate, r.scoreLead);
@@ -169,8 +203,283 @@ function doResign() {
   endGame(`${loser === 1 ? '黑' : '白'}方认输 · ${loser === 1 ? '白' : '黑'}胜`, true);
 }
 
+/* ============================================================
+ * 死活练习
+ * ============================================================ */
+function currentProblem() {
+  return state.tsumego.problem;
+}
+
+function buildProblemBoard(problem) {
+  const board = Array.from({ length: problem.size }, () => new Array(problem.size).fill(0));
+  for (const p of problem.black) board[p.y][p.x] = 1;
+  for (const p of problem.white) board[p.y][p.x] = 2;
+  return board;
+}
+
+function setMode(mode) {
+  if (state.editing) exitEditMode();
+  state.mode = mode;
+  state.thinking = false;
+  state.puzzleSolved = false;
+  $('result').classList.remove('show');
+  updateModeUI();
+  if (mode === 'tsumego') {
+    if (state.tsumego.problem) loadProblem(state.tsumego.collection, state.tsumego.index);
+    else randomProblem();
+  } else newGame();
+}
+
+function updateModeUI() {
+  document.body.dataset.mode = state.mode;   // CSS 据此显隐 .game-only / .tsumego-only
+  // 注意选择器须限定在标签按钮上：body 自身也带 data-mode 属性
+  document.querySelectorAll('.mode-tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === state.mode));
+}
+
+function populateTsumegoControls() {
+  const sel = $('tsumegoCollection');
+  if (!sel || !window.TSUMEGO) return;
+  const opts = [`<option value="all">全部合集（共 ${TSUMEGO.totalCount()} 题）</option>`];
+  for (const c of TSUMEGO.getCollections())
+    opts.push(`<option value="${c.id}">${c.name}（${c.count} 题）</option>`);
+  sel.innerHTML = opts.join('');
+  sel.value = state.tsumego.collection === 'all' ? 'all' : state.tsumego.collection;
+}
+
+function loadProblem(cid, index) {
+  const problem = TSUMEGO.getProblem(cid, index);
+  if (!problem) return;
+  state.mode = 'tsumego';
+  state.epoch++;
+  state.tsumego.collection = cid;
+  state.tsumego.index = problem.index;
+  state.tsumego.problem = problem;
+  state.puzzleSolved = false;
+  state.boardSize = problem.size;
+  state.moves = [];
+  state.initialPlayer = 'B';
+  state.game = new GoGame(problem.size);
+  const board = buildProblemBoard(problem);
+  state.game.setupPosition(board, 1);
+  state.setupStones = boardToStones(board, problem.size);
+  state.thinking = false;
+  if (!state.view) { state.view = new BoardView($('board'), state.game, handleHumanPlay); state.view.onEdit = onEditChange; }
+  state.view.editMode = false;
+  state.view.interactive = true;
+  state.view.viewport = problem.region;
+  state.view.setGame(state.game);   // setGame 会按视口重新布局并聚焦题区
+  hideSeal();
+  $('result').classList.remove('show');
+  $('problemTitle').textContent = problem.title;
+  $('problemGoal').textContent = `${problem.goalText} · ${problem.level}`;
+  $('problemJudge').textContent = '';
+  $('problemNote').textContent = 'KataGo 执白应对，双方着手都限制在题目区域内。';
+  const input = $('problemIndexInput');
+  if (input) { input.value = problem.index + 1; input.max = problem.count; }
+  $('problemCount').textContent = `/ ${problem.count}`;
+  const sel = $('tsumegoCollection');
+  if (sel && sel.value !== 'all') sel.value = problem.collection;
+  updateModeUI();
+  updateStatus();
+  flash(`${problem.goalText}：你执黑先手，KataGo 执白应对`);
+}
+
+function resetProblem() {
+  if (state.mode !== 'tsumego' || !state.tsumego.problem) return;
+  loadProblem(state.tsumego.collection, state.tsumego.index);
+}
+
+function randomProblem() {
+  const sel = $('tsumegoCollection');
+  const cid = sel ? sel.value : state.tsumego.collection;
+  const ref = TSUMEGO.randomRef(cid);
+  loadProblem(ref.collection, ref.index);
+}
+
+function stepProblem(delta) {
+  const t = state.tsumego;
+  if (!t.problem) { randomProblem(); return; }
+  loadProblem(t.problem.collection, t.index + delta);
+}
+
+function jumpProblem() {
+  const t = state.tsumego;
+  const n = parseInt($('problemIndexInput').value, 10);
+  if (!Number.isFinite(n)) return;
+  loadProblem(t.problem ? t.problem.collection : t.collection, n - 1);
+}
+
+function tsumegoVisits(kind = 'reply') {
+  if (state.tsumegoStrength === 'pro') return kind === 'hint' ? 1000 : 900;
+  return kind === 'hint' ? 450 : 220;
+}
+
+/* 把题目区域之外的所有点设为双方禁着（搜索全程生效），让 KataGo 聚焦局部攻防 */
+function tsumegoQueryOptions() {
+  const problem = currentProblem();
+  const opts = { includeOwnership: true };
+  if (!problem) return opts;
+  const r = problem.region, n = problem.size;
+  const outside = [];
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      if (x < r.x0 || x > r.x1 || y < r.y0 || y > r.y1) outside.push(vertex(x, y));
+  if (outside.length) {
+    opts.avoidMoves = [
+      { player: 'B', moves: outside, untilDepth: 64 },
+      { player: 'W', moves: outside, untilDepth: 64 },
+    ];
+  }
+  return opts;
+}
+
+function inProblemRegion(x, y) {
+  const p = currentProblem();
+  if (!p) return true;
+  const r = p.region;
+  return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
+}
+
+function handleProblemPlay(x, y) {
+  const problem = currentProblem();
+  if (!problem) return;
+  if (!inProblemRegion(x, y)) { flash('请在题目区域内落子'); return; }
+  const res = pushPlay(x, y);
+  if (!res.legal) { flash(reasonText(res.reason)); return; }
+  hideSeal();
+  state.view.hintMove = null;
+  state.view.draw();
+  updateStatus();
+  scheduleProblemReply();
+}
+
+function scheduleProblemReply() {
+  const problem = currentProblem();
+  if (!problem || state.game.gameOver) return;
+  const ep = state.epoch;   // 回包时已换题/重做则丢弃，避免旧应手落到新题面
+  state.thinking = true;
+  state.view.interactive = false;
+  updateStatus();
+  kataQuery('/genmove', tsumegoVisits('reply'), tsumegoQueryOptions())
+    .then(r => {
+      if (state.epoch !== ep) return;
+      const mv = fromVertex(r.bestMove);
+      if (mv) pushPlay(mv.x, mv.y); else pushPass();
+      updateWinrate(r.winrate, r.scoreLead);
+      const verdict = judgeProblem(r.ownership);
+      const reply = r.bestMove === 'pass' ? '虚手（白已无手可下）' : r.bestMove;
+      flash(`KataGo 应手：${reply}${verdict ? `　${verdict}` : ''}`);
+    })
+    .catch(err => {
+      if (state.epoch !== ep) return;
+      console.warn(err);
+      if (state.game.turn !== 1 && state.game.undo()) state.moves.pop();
+      flash('KataGo 后端未连接：请先运行 backend/start.sh 并安装/配置 KataGo');
+    })
+    .finally(() => {
+      if (state.epoch !== ep) return;
+      state.thinking = false;
+      state.view.interactive = true;
+      state.view.draw();
+      updateStatus();
+    });
+}
+
+/* 依据 KataGo ownership（黑视角，按行自左上排列）判断题区内双方棋块死活 */
+function judgeProblem(ownership) {
+  const problem = currentProblem();
+  if (!problem || !Array.isArray(ownership)) return '';
+  const n = problem.size, r = problem.region;
+  let bSum = 0, bCnt = 0, wSum = 0, wCnt = 0;
+  for (let y = r.y0; y <= r.y1; y++)
+    for (let x = r.x0; x <= r.x1; x++) {
+      const s = state.game.board[y][x];
+      const own = ownership[y * n + x];
+      if (s === 1) { bSum += own; bCnt++; }
+      else if (s === 2) { wSum += own; wCnt++; }
+    }
+  const bMean = bCnt ? bSum / bCnt : 0;   // >0 归黑
+  const wMean = wCnt ? wSum / wCnt : 0;
+  const whiteDead = wCnt > 0 && wMean > 0.55;
+  const whiteAlive = wCnt > 0 && wMean < -0.45;
+  const blackDead = bCnt > 0 && bMean < -0.55;
+  const blackAlive = bCnt > 0 && bMean > 0.45;
+  const parts = [];
+  if (whiteDead) parts.push('白棋已净死');
+  else if (whiteAlive) parts.push('白棋已安定');
+  if (blackDead) parts.push('黑棋已阵亡');
+  else if (blackAlive) parts.push('黑棋已安定');
+  let verdict = parts.length ? `局部判定：${parts.join('，')}` : '局部判定：胜负未定';
+
+  const solved = (problem.goal === 'kill' && whiteDead) ||
+                 (problem.goal === 'live' && blackAlive && !blackDead);
+  const failed = (problem.goal === 'kill' && whiteAlive) ||
+                 (problem.goal === 'live' && blackDead);
+  if (solved && !state.puzzleSolved) {
+    state.puzzleSolved = true;
+    verdict += ' — 🎉 目标达成！';
+    showSeal('ok');
+  } else if (failed) {
+    verdict += ' — 目标落空，点「重做」再试';
+    showSeal('fail');
+  }
+  $('problemJudge').textContent = verdict;
+  return solved ? '🎉 目标达成！' : '';
+}
+
+function showProblemHint() {
+  if (state.mode !== 'tsumego' || state.thinking || !humanTurnNow()) return;
+  const ep = state.epoch;
+  flash('KataGo 分析中…');
+  kataQuery('/analyze', tsumegoVisits('hint'), tsumegoQueryOptions())
+    .then(r => {
+      if (state.epoch !== ep) return;
+      const mv = fromVertex(r.bestMove);
+      if (mv) { state.view.hintMove = mv; state.view.draw(); }
+      updateWinrate(r.winrate, r.scoreLead);
+      const tops = (r.candidates || []).slice(0, 3).map(c => c.move).join('  ');
+      flash(`KataGo 建议：${r.bestMove}${tops ? `　候选：${tops}` : ''}`);
+    })
+    .catch(() => flash('KataGo 后端未连接，无法分析提示'));
+}
+
+function searchTsumegoOnline() {
+  const input = $('tsumegoSearchInput');
+  const results = $('tsumegoSearchResults');
+  const q = (input.value || '').trim() || '高级死活题';
+  results.innerHTML = '<div class="search-note">搜索中…</div>';
+  fetch(`${state.backendUrl}/tsumego-search?q=${encodeURIComponent(q)}`)
+    .then(r => r.json().then(j => ({ ok: r.ok, j })))
+    .then(({ ok, j }) => {
+      if (!ok) throw new Error(j.error || '搜索失败');
+      renderSearchResults(j.results || []);
+    })
+    .catch(e => {
+      results.innerHTML = `<div class="search-note">${escapeHtml(e.message)}。请确认后端已启动且能访问外网。</div>`;
+    });
+}
+
+function renderSearchResults(items) {
+  const results = $('tsumegoSearchResults');
+  if (!items.length) {
+    results.innerHTML = '<div class="search-note">没有找到结果，换个关键词试试。</div>';
+    return;
+  }
+  results.innerHTML = items.map(item => {
+    const title = escapeHtml(item.title || item.url);
+    const url = escapeHtml(item.url || '#');
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}<span class="search-url">${url}</span></a>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
+}
+
 /* —— KataGo 后端请求 —— */
-async function kataQuery(path, maxVisits) {
+async function kataQuery(path, maxVisits, extra = {}) {
   const res = await fetch(state.backendUrl + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -178,6 +487,7 @@ async function kataQuery(path, maxVisits) {
       moves: state.moves, size: state.boardSize,
       komi: state.komi, rules: 'chinese', maxVisits,
       initialStones: state.setupStones, initialPlayer: state.initialPlayer,
+      ...extra,
     }),
   });
   if (!res.ok) throw new Error('backend ' + res.status);
@@ -199,13 +509,41 @@ function endGame(msg, skipScore) {
   updateStatus();
 }
 
+/* —— 印章（正解 / 再思）—— */
+function showSeal(kind) {
+  const s = $('seal');
+  s.textContent = kind === 'ok' ? '正解' : '再思';
+  s.className = 'seal';
+  void s.offsetWidth;               // 重置动画，使连续盖章也能重播
+  s.className = `seal show ${kind}`;
+  clearTimeout(showSeal._t);
+  if (kind === 'fail') showSeal._t = setTimeout(hideSeal, 1800);
+}
+function hideSeal() {
+  clearTimeout(showSeal._t);
+  $('seal').className = 'seal';
+}
+
 /* —— 界面更新 —— */
 function updateStatus() {
   const g = state.game;
+  $('turnIndicator').classList.toggle('thinking', state.thinking);
   $('moveNum').textContent = g.moveNumber;
   $('capBlack').textContent = g.captures[1];
   $('capWhite').textContent = g.captures[2];
   const turnEl = $('turnIndicator');
+  if (state.mode === 'tsumego') {
+    const p = currentProblem();
+    if (!p) return;
+    if (state.puzzleSolved) {
+      turnEl.innerHTML = '<span class="turn-label">死活题完成 · 目标达成 🎉</span>';
+      return;
+    }
+    const dot = `<span class="stone-dot ${g.turn === 1 ? 'black' : 'white'}"></span>`;
+    const who = state.thinking ? 'KataGo（白）应手中…' : '你执黑先手';
+    turnEl.innerHTML = `${dot}<span class="turn-label">${g.turn === 1 ? '黑' : '白'}方 · ${who}</span>`;
+    return;
+  }
   if (g.gameOver) { turnEl.innerHTML = '<span class="turn-label">对局结束</span>'; return; }
   const dot = `<span class="stone-dot ${g.turn === 1 ? 'black' : 'white'}"></span>`;
   const who = !aiControlsTurn() ? '该你落子'
@@ -219,7 +557,7 @@ function updateWinrate(wrBlack, scoreLead) {
   $('wrBlack').textContent = pct + '%';
   $('wrWhite').textContent = (100 - pct) + '%';
   const lead = scoreLead > 0 ? `黑 +${scoreLead}` : (scoreLead < 0 ? `白 +${(-scoreLead)}` : '均势');
-  $('wrLead').textContent = state.engine === 'katago' ? `目差 ${lead}` : '（本地 AI 无胜率估计）';
+  $('wrLead').textContent = (state.engine === 'katago' || state.mode === 'tsumego') ? `目差 ${lead}` : '（本地 AI 无胜率估计）';
 }
 
 function flash(text) {
@@ -327,6 +665,7 @@ function confirmEdit() {
 
 /* 把任意布局载入为当前对局 */
 function applyImportedPosition(size, board, turn) {
+  state.epoch++;
   state.boardSize = size;
   state.game = new GoGame(size);
   state.game.setupPosition(board, turn);
@@ -354,6 +693,7 @@ function boardToStones(board, size) {
 
 /* —— PC 端轮询：自动同步手机上传的最新布局 —— */
 function pollPosition(applyEvenIfOwn) {
+  if (state.mode !== 'game') return;
   fetch(state.backendUrl + '/position')
     .then(r => r.json())
     .then(j => {
@@ -369,6 +709,9 @@ function pollPosition(applyEvenIfOwn) {
 
 /* —— 控件绑定 —— */
 function bindControls() {
+  populateTsumegoControls();
+  document.querySelectorAll('.mode-tabs button').forEach(btn =>
+    btn.addEventListener('click', () => setMode(btn.dataset.mode)));
   document.querySelectorAll('[data-size]').forEach(btn =>
     btn.addEventListener('click', () => { setActive('[data-size]', btn); state.boardSize = +btn.dataset.size; newGame(); }));
   document.querySelectorAll('[data-aiside]').forEach(btn =>
@@ -387,11 +730,32 @@ function bindControls() {
       updateWinrate(0.5, 0);
       if (state.engine === 'katago') checkBackend();
     }));
+  document.querySelectorAll('[data-tsumego-strength]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      setActive('[data-tsumego-strength]', btn);
+      state.tsumegoStrength = btn.dataset.tsumegoStrength;
+      const visits = tsumegoVisits('reply');
+      flash(`死活强度：${btn.textContent}（后手 ${visits} visits）`);
+    }));
   $('btnNew').addEventListener('click', newGame);
   $('btnPass').addEventListener('click', doPass);
   $('btnUndo').addEventListener('click', doUndo);
   $('btnHint').addEventListener('click', doHint);
   $('btnResign').addEventListener('click', doResign);
+  $('btnProblemHint').addEventListener('click', showProblemHint);
+  $('btnProblemReset').addEventListener('click', resetProblem);
+  $('btnProblemRandom').addEventListener('click', randomProblem);
+  $('btnProblemPrev').addEventListener('click', () => stepProblem(-1));
+  $('btnProblemNext').addEventListener('click', () => stepProblem(1));
+  $('btnProblemGo').addEventListener('click', jumpProblem);
+  $('problemIndexInput').addEventListener('keydown', e => { if (e.key === 'Enter') jumpProblem(); });
+  $('tsumegoCollection').addEventListener('change', () => {
+    if (state.mode === 'tsumego') randomProblem();
+  });
+  $('btnTsumegoSearch').addEventListener('click', searchTsumegoOnline);
+  $('tsumegoSearchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') searchTsumegoOnline();
+  });
 
   // 上传与校正
   $('fileInput').addEventListener('change', e => { handleUpload(e.target.files[0]); e.target.value = ''; });
