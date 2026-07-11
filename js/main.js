@@ -564,15 +564,18 @@ function scheduleTrialJudge() {
     });
 }
 
+// 形势分析（提示 / 热力图）专用令牌：落子或换手时自增，使在途的旧分析回包作废，
+// 不叠到新局面上（epoch 只在换题/新局/推演切换时变，落子不变，故需这个更细的令牌）。
+let hintToken = 0;
 function showProblemHint() {
   if (state.mode !== 'tsumego' || state.thinking || !humanTurnNow()) return;
-  const ep = state.epoch;
+  const ep = state.epoch, tk = ++hintToken;
   const ex = $('problemExplain');
   if (ex) { ex.innerHTML = 'KataGo 分析中…'; ex.classList.add('show'); }
   flash('KataGo 分析中…');
   kataQuery('/analyze', tsumegoVisits('hint'), tsumegoQueryOptions())
     .then(r => {
-      if (state.epoch !== ep) return;
+      if (state.epoch !== ep || tk !== hintToken) return;
       // 前三候选点标到棋盘（①首选／②③次选）
       const cands = (r.candidates || []).slice(0, 3)
         .map(c => { const p = pointFromVertex(c.move); return p ? { ...p, move: c.move } : null; })
@@ -589,6 +592,7 @@ function showProblemHint() {
       flash(`KataGo 建议：${r.bestMove}${tops ? `　候选：${tops}` : ''}`);
     })
     .catch(() => {
+      if (state.epoch !== ep || tk !== hintToken) return;
       if (ex) ex.innerHTML = 'KataGo 后端未连接，无法分析提示';
       flash('KataGo 后端未连接，无法分析提示');
     });
@@ -624,10 +628,10 @@ function toggleHeat() {
   state.view.showHeat = on;
   setHeatButton(on);
   if (on && !state.view.heatmap && !state.thinking) {
-    const ep = state.epoch;
+    const ep = state.epoch, tk = ++hintToken;
     flash('KataGo 分析形势中…');
     kataQuery('/analyze', tsumegoVisits('hint'), tsumegoQueryOptions())
-      .then(r => { if (state.epoch === ep) applyOwnershipViz(r.ownership); })
+      .then(r => { if (state.epoch === ep && tk === hintToken) applyOwnershipViz(r.ownership); })
       .catch(() => flash('KataGo 后端未连接，无法显示形势'));
   }
   state.view.draw();
@@ -641,14 +645,15 @@ function setHeatButton(on) {
 /* 形势热力图开着时，为当前局面（含刚换的题）重新拉一次归属数据填充 */
 function refreshHeatIfOn() {
   if (!state.view || !state.view.showHeat || !currentProblem() || state.thinking) return;
-  const ep = state.epoch;
+  const ep = state.epoch, tk = ++hintToken;
   kataQuery('/analyze', tsumegoVisits('reply'), tsumegoQueryOptions())
-    .then(r => { if (state.epoch === ep) applyOwnershipViz(r.ownership); })
+    .then(r => { if (state.epoch === ep && tk === hintToken) applyOwnershipViz(r.ownership); })
     .catch(() => {});
 }
 
 /* 清除提示相关的临时叠加（候选点、讲解），换手后调用；热力图保留由 showHeat 控制 */
 function clearHintOverlay() {
+  hintToken++;   // 作废在途的形势分析回包，避免旧结果叠到新局面
   if (state.view) { state.view.candidates = null; state.view.hintMove = null; }
   const ex = $('problemExplain');
   if (ex) { ex.innerHTML = ''; ex.classList.remove('show'); }
