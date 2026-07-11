@@ -200,6 +200,28 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 }
 .problem-judge:empty { display: none; }
 
+/* 死活讲解面板 */
+.problem-explain {
+  margin-top: 7px; padding: 8px 10px;
+  font-size: 12.5px; line-height: 1.7; color: var(--ink);
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--line); border-left: 3px solid var(--cinnabar);
+  border-radius: 0 5px 5px 0;
+  display: none;
+}
+.problem-explain.show { display: block; }
+.problem-explain .hl { color: var(--cinnabar-d); font-weight: 700; letter-spacing: 0.02em; }
+.problem-explain b { color: var(--ink); }
+
+/* 形势热力图开关与图例 */
+.heat-toggle { width: 100%; }
+.heat-toggle.on {
+  background: var(--cinnabar); color: #fff; border-color: var(--cinnabar);
+}
+.heat-b, .heat-w { padding: 0 4px; border-radius: 3px; font-weight: 600; }
+.heat-b { color: #fff; background: rgba(24, 52, 74, 0.85); }
+.heat-w { color: #fff; background: rgba(158, 52, 38, 0.85); }
+
 /* ============================================================
  * 侧栏卡片
  * ============================================================ */

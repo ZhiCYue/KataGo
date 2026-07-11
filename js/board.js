@@ -9,6 +9,9 @@ class BoardView {
     this.onPlay = onPlay;
     this.hover = null;
     this.hintMove = null;
+    this.candidates = null;  // 死活提示：[{x,y,move}] 前几个候选点，带序号显示
+    this.heatmap = null;     // KataGo ownership（黑视角，长度 size*size）
+    this.showHeat = false;   // 是否叠加形势热力图
     this.interactive = true;
     this.showCoords = true;
     this.editMode = false;   // 校正模式：点击交叉点循环 空→黑→白
@@ -28,7 +31,7 @@ class BoardView {
     this.resize();
   }
 
-  setGame(game) { this.game = game; this.hintMove = null; this.resize(); }
+  setGame(game) { this.game = game; this.hintMove = null; this.candidates = null; this.heatmap = null; this.resize(); }
 
   setViewport(vp) { this.viewport = vp || null; this.resize(); }
 
@@ -167,6 +170,20 @@ class BoardView {
       ctx.fill();
     }
 
+    // —— 形势热力图（在棋子之下）：ownership>0 归黑（青黛），<0 归白（朱），越纯越浓 ——
+    if (this.showHeat && this.heatmap) {
+      for (let y = vp.y0; y <= vp.y1; y++)
+        for (let x = vp.x0; x <= vp.x1; x++) {
+          const o = this.heatmap[y * n + x];
+          if (o == null) continue;
+          const a = Math.abs(o) * 0.6;
+          if (a < 0.07) continue;
+          ctx.fillStyle = o > 0 ? `rgba(24,52,74,${a})` : `rgba(158,52,38,${a})`;
+          const s = this.cell * 0.9;
+          ctx.fillRect(this.pxX(x) - s / 2, this.pxY(y) - s / 2, s, s);
+        }
+    }
+
     // —— 坐标 ——
     if (this.showCoords) {
       ctx.fillStyle = 'rgba(70,48,22,0.75)';
@@ -196,8 +213,27 @@ class BoardView {
     // —— 落子预览（半透明）——
     if (this.hover) this.drawStone(this.hover.x, this.hover.y, this.game.turn, 0.4);
 
-    // —— 提示标记（朱砂圈）——
-    if (this.hintMove && this.inView(this.hintMove.x, this.hintMove.y)) {
+    // —— 死活候选点：①首选（朱砂粗圈）②③次选（细圈），圈内标序号 ——
+    if (this.candidates && this.candidates.length) {
+      this.candidates.forEach((c, i) => {
+        if (!this.inView(c.x, c.y)) return;
+        const first = i === 0;
+        const cx = this.pxX(c.x), cy = this.pxY(c.y);
+        ctx.beginPath();
+        ctx.arc(cx, cy, this.cell * (first ? 0.42 : 0.34), 0, Math.PI * 2);
+        ctx.strokeStyle = first ? '#b8402f' : 'rgba(184,64,47,0.55)';
+        ctx.lineWidth = first ? 2.6 : 1.8;
+        ctx.stroke();
+        // 空点上标序号；点上已有棋子则不压字，仅留圈
+        if (this.game.board[c.y][c.x] === 0) {
+          ctx.fillStyle = first ? '#b8402f' : 'rgba(184,64,47,0.75)';
+          ctx.font = `bold ${this.cell * 0.4}px "Cormorant Garamond", serif`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(String(i + 1), cx, cy + this.cell * 0.02);
+        }
+      });
+    } else if (this.hintMove && this.inView(this.hintMove.x, this.hintMove.y)) {
+      // —— 对局提示标记（朱砂圈）——
       ctx.beginPath();
       ctx.arc(this.pxX(this.hintMove.x), this.pxY(this.hintMove.y), this.cell * 0.42, 0, Math.PI * 2);
       ctx.strokeStyle = '#b8402f';

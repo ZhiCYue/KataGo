@@ -16,7 +16,7 @@ const state = {
   komi: 7.5,
   thinking: false,
   epoch: 0,               // 局面代数：换题/新局时 +1，用于丢弃迟到的 AI 回包
-  trial: null,            // 推演模式快照：{ moveNumber, movesLen, aiSide }；null 表示未在推演
+  trial: null,            // 推演模式快照：{ moveNumber, movesLen, aiSide, judgeText }；null 表示未在推演
   moves: [],              // 当前局面之后下出的着手 [["B","Q16"],...]
   setupStones: [],        // 起始布局（来自上传识别）发给 KataGo 的 initialStones
   initialPlayer: 'B',     // 起始布局轮到谁走（moves 从该方起算）
@@ -226,7 +226,8 @@ function toggleTrial() {
     state.epoch++;                     // 丢弃在途的 AI 回包，避免它落进推演局面
     state.thinking = false;
     state.view.interactive = true;
-    state.trial = { moveNumber: state.game.moveNumber, movesLen: state.moves.length, aiSide: state.aiSide };
+    state.trial = { moveNumber: state.game.moveNumber, movesLen: state.moves.length,
+                    aiSide: state.aiSide, judgeText: $('problemJudge') ? $('problemJudge').textContent : '' };
     state.aiSide = 0;
     setTrialButtons(true);
     flash(state.mode === 'tsumego'
@@ -243,6 +244,7 @@ function toggleTrial() {
     setActive('[data-aiside]', document.querySelector(`[data-aiside="${state.aiSide}"]`));
     state.view.hintMove = null;
     state.view.draw();
+    if (state.mode === 'tsumego' && $('problemJudge')) $('problemJudge').textContent = t.judgeText || '';
     flash('已回到推演前的局面');
     // 死活题：若返回时正轮白棋（推演切入时 KataGo 还没应手），让它接着应
     if (state.mode === 'tsumego' && state.game.turn === 2) scheduleProblemReply();
@@ -333,6 +335,11 @@ function loadProblem(cid, index) {
   $('problemGoal').textContent = `${problem.goalText} · ${problem.level}`;
   $('problemJudge').textContent = '';
   $('problemNote').textContent = 'KataGo 执白应对，双方着手都限制在题目区域内。';
+  // 候选点/讲解是本题专属，换题清掉；形势热力图是「粘性」开关，保留用户的开/关状态，
+  // 若开着则为新局面重新拉一次归属数据（仅再次点「形势」才会关闭）。
+  clearHintOverlay();
+  setHeatButton(state.view.showHeat);
+  refreshHeatIfOn();
   const input = $('problemIndexInput');
   if (input) { input.value = problem.index + 1; input.max = problem.count; }
   $('problemCount').textContent = `/ ${problem.count}`;
@@ -410,10 +417,10 @@ function handleProblemPlay(x, y) {
   const res = pushPlay(x, y);
   if (!res.legal) { flash(reasonText(res.reason)); return; }
   hideSeal();
-  state.view.hintMove = null;
+  clearHintOverlay();   // 候选点/讲解随局面改变而失效
   state.view.draw();
   updateStatus();
-  if (state.trial) return;   // 推演中：不触发 KataGo 应手，黑白都手动摆
+  if (state.trial) { scheduleTrialJudge(); return; }   // 推演中：不触发 KataGo 应手，只判死活
   scheduleProblemReply();
 }
 
@@ -432,6 +439,7 @@ function scheduleProblemReply() {
       if (mv) pushPlay(mv.x, mv.y); else pushPass();
       updateWinrate(r.winrate, r.scoreLead);
       const st = judgeProblem(r.ownership) || {};
+      applyOwnershipViz(r.ownership);
       flash(composeReplyMessage(r.bestMove, mv, tenuki, st));
     })
     .catch(err => {
@@ -474,8 +482,16 @@ function composeReplyMessage(bestMove, mv, tenuki, st) {
   return msg;
 }
 
-/* 依据 KataGo ownership（黑视角，按行自左上排列）判断题区内双方棋块死活 */
-function judgeProblem(ownership) {
+/* 收到 ownership 后更新棋盘热力图；若已开启「形势」叠加则立即重绘 */
+function applyOwnershipViz(ownership) {
+  if (!state.view || !Array.isArray(ownership)) return;
+  state.view.heatmap = ownership;
+  if (state.view.showHeat) state.view.draw();
+}
+
+/* 纯计算：依据 KataGo ownership（黑视角，按行自左上排列）判断题区内双方棋块死活，
+ * 返回状态标志与「局部判定：…」文案，无任何副作用（成败/盖印由调用方处理）。 */
+function analyzeOwnership(ownership) {
   const problem = currentProblem();
   if (!problem || !Array.isArray(ownership)) return null;
   const n = problem.size, r = problem.region;
@@ -498,12 +514,20 @@ function judgeProblem(ownership) {
   else if (whiteAlive) parts.push('白棋已安定');
   if (blackDead) parts.push('黑棋已阵亡');
   else if (blackAlive) parts.push('黑棋已安定');
-  let verdict = parts.length ? `局部判定：${parts.join('，')}` : '局部判定：胜负未定';
+  const verdict = parts.length ? `局部判定：${parts.join('，')}` : '局部判定：胜负未定';
+  return { whiteDead, whiteAlive, blackDead, blackAlive, verdict };
+}
 
-  const solved = (problem.goal === 'kill' && whiteDead) ||
-                 (problem.goal === 'live' && blackAlive && !blackDead);
-  const failed = (problem.goal === 'kill' && whiteAlive) ||
-                 (problem.goal === 'live' && blackDead);
+/* 正式判定：在死活状态基础上结合题目目标给出成败、盖印并更新判定栏 */
+function judgeProblem(ownership) {
+  const problem = currentProblem();
+  const st = analyzeOwnership(ownership);
+  if (!problem || !st) return null;
+  let verdict = st.verdict;
+  const solved = (problem.goal === 'kill' && st.whiteDead) ||
+                 (problem.goal === 'live' && st.blackAlive && !st.blackDead);
+  const failed = (problem.goal === 'kill' && st.whiteAlive) ||
+                 (problem.goal === 'live' && st.blackDead);
   const solvedNow = solved && !state.puzzleSolved;
   if (solvedNow) {
     state.puzzleSolved = true;
@@ -514,23 +538,120 @@ function judgeProblem(ownership) {
     showSeal('fail');
   }
   $('problemJudge').textContent = verdict;
-  return { whiteDead, whiteAlive, blackDead, blackAlive, solved, failed, solvedNow };
+  return { ...st, solved, failed, solvedNow };
+}
+
+/* 推演模式的死活判定：请求 ownership 显示「已做活/已身亡」，
+ * 但不计成败、不盖印、不改 puzzleSolved（推演只是试摆，不影响本题战绩）。 */
+let trialJudgeToken = 0;
+function scheduleTrialJudge() {
+  if (!currentProblem() || !state.trial) return;
+  const ep = state.epoch;
+  const token = ++trialJudgeToken;   // 连续试摆时只保留最新一次判定，丢弃过期回包
+  $('problemJudge').textContent = '局部判定：推演分析中…';
+  kataQuery('/analyze', tsumegoVisits('reply'), tsumegoQueryOptions())
+    .then(r => {
+      if (state.epoch !== ep || token !== trialJudgeToken || !state.trial) return;
+      const st = analyzeOwnership(r.ownership);
+      if (!st) return;
+      updateWinrate(r.winrate, r.scoreLead);
+      applyOwnershipViz(r.ownership);
+      $('problemJudge').textContent = st.verdict + '（推演）';
+    })
+    .catch(() => {
+      if (state.epoch === ep && token === trialJudgeToken && state.trial)
+        $('problemJudge').textContent = '局部判定：推演判定需 KataGo 后端';
+    });
 }
 
 function showProblemHint() {
   if (state.mode !== 'tsumego' || state.thinking || !humanTurnNow()) return;
   const ep = state.epoch;
+  const ex = $('problemExplain');
+  if (ex) { ex.innerHTML = 'KataGo 分析中…'; ex.classList.add('show'); }
   flash('KataGo 分析中…');
   kataQuery('/analyze', tsumegoVisits('hint'), tsumegoQueryOptions())
     .then(r => {
       if (state.epoch !== ep) return;
-      const mv = fromVertex(r.bestMove);
-      if (mv) { state.view.hintMove = mv; state.view.draw(); }
+      // 前三候选点标到棋盘（①首选／②③次选）
+      const cands = (r.candidates || []).slice(0, 3)
+        .map(c => { const p = pointFromVertex(c.move); return p ? { ...p, move: c.move } : null; })
+        .filter(Boolean);
+      state.view.candidates = cands.length ? cands : null;
+      state.view.hintMove = cands[0] || null;
+      state.view.showHeat = true;          // 提示同时点亮形势热力图
+      setHeatButton(true);
+      applyOwnershipViz(r.ownership);
+      state.view.draw();
       updateWinrate(r.winrate, r.scoreLead);
-      const tops = (r.candidates || []).slice(0, 3).map(c => c.move).join('  ');
+      if (ex) ex.innerHTML = buildHintExplain(r);
+      const tops = cands.map(c => c.move).join('  ');
       flash(`KataGo 建议：${r.bestMove}${tops ? `　候选：${tops}` : ''}`);
     })
-    .catch(() => flash('KataGo 后端未连接，无法分析提示'));
+    .catch(() => {
+      if (ex) ex.innerHTML = 'KataGo 后端未连接，无法分析提示';
+      flash('KataGo 后端未连接，无法分析提示');
+    });
+}
+
+/* 规则化讲解：目标 + 急所推荐（据候选胜率差判断唯一性）+ 当前死活 + 原理提示 */
+function buildHintExplain(r) {
+  const p = currentProblem();
+  if (!p) return '';
+  const cands = r.candidates || [];
+  const best = cands[0];
+  const lines = [`<b>目标</b>：${p.goalText}`];
+  if (best) {
+    const gap = cands[1] ? best.winrate - cands[1].winrate : 1;
+    const crit = gap > 0.12 ? '这是本题<b>急所</b>，几乎是唯一的一手'
+      : gap > 0.04 ? '首选此点，另有其他可行下法'
+        : '此处有多个价值接近的选择，可自行权衡';
+    lines.push(`<b>推荐</b> <span class="hl">${best.move}</span>（黑胜率 ${Math.round(best.winrate * 100)}%）——${crit}。`);
+    if (cands[1]) lines.push(`次选：${cands.slice(1, 3).map(c => c.move).join('、')}`);
+  }
+  const st = analyzeOwnership(r.ownership);
+  if (st) lines.push(st.verdict.replace('局部判定：', '<b>当前形势</b>：'));
+  lines.push(p.goal === 'kill' ? '<b>思路</b>：点在白棋做眼的要害，使它只能成一只眼。'
+    : p.goal === 'live' ? '<b>思路</b>：抢占扩大眼位／做第二只眼的要点。'
+      : '<b>思路</b>：先找双方都想抢的那个要点——敌之要点即我之要点。');
+  return lines.join('<br>');
+}
+
+/* 形势热力图开关：开启时若尚无归属数据，拉一次分析补齐 */
+function toggleHeat() {
+  if (state.mode !== 'tsumego' || !currentProblem()) return;
+  const on = !state.view.showHeat;
+  state.view.showHeat = on;
+  setHeatButton(on);
+  if (on && !state.view.heatmap && !state.thinking) {
+    const ep = state.epoch;
+    flash('KataGo 分析形势中…');
+    kataQuery('/analyze', tsumegoVisits('hint'), tsumegoQueryOptions())
+      .then(r => { if (state.epoch === ep) applyOwnershipViz(r.ownership); })
+      .catch(() => flash('KataGo 后端未连接，无法显示形势'));
+  }
+  state.view.draw();
+}
+
+function setHeatButton(on) {
+  const b = $('btnHeat');
+  if (b) { b.classList.toggle('on', on); b.textContent = on ? '形势 ✓' : '形势热力图'; }
+}
+
+/* 形势热力图开着时，为当前局面（含刚换的题）重新拉一次归属数据填充 */
+function refreshHeatIfOn() {
+  if (!state.view || !state.view.showHeat || !currentProblem() || state.thinking) return;
+  const ep = state.epoch;
+  kataQuery('/analyze', tsumegoVisits('reply'), tsumegoQueryOptions())
+    .then(r => { if (state.epoch === ep) applyOwnershipViz(r.ownership); })
+    .catch(() => {});
+}
+
+/* 清除提示相关的临时叠加（候选点、讲解），换手后调用；热力图保留由 showHeat 控制 */
+function clearHintOverlay() {
+  if (state.view) { state.view.candidates = null; state.view.hintMove = null; }
+  const ex = $('problemExplain');
+  if (ex) { ex.innerHTML = ''; ex.classList.remove('show'); }
 }
 
 /* —— KataGo 后端请求 —— */
@@ -839,6 +960,7 @@ function bindControls() {
   $('btnTrialTsumego').addEventListener('click', toggleTrial);
   $('btnResign').addEventListener('click', doResign);
   $('btnProblemHint').addEventListener('click', showProblemHint);
+  { const hb = $('btnHeat'); if (hb) hb.addEventListener('click', toggleHeat); }
   $('btnProblemReset').addEventListener('click', resetProblem);
   $('btnProblemRandom').addEventListener('click', randomProblem);
   $('btnProblemPrev').addEventListener('click', () => stepProblem(-1));

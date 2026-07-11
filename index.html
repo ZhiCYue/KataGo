@@ -39,6 +39,7 @@
           <div id="problemGoal" class="problem-goal"></div>
         </div>
         <div id="problemJudge" class="problem-judge"></div>
+        <div id="problemExplain" class="problem-explain"></div>
         <p id="problemNote" class="note tiny"></p>
       </div>
 
@@ -95,6 +96,9 @@
           <input id="visitsRange" type="range" min="50" max="1600" step="50" value="220" />
           <span id="visitsVal" class="visits-val">220</span>
         </div>
+        <label class="card-label gap-top">形势图</label>
+        <button id="btnHeat" class="btn heat-toggle">形势热力图</button>
+        <p class="note tiny">开启后按 KataGo 归属着色：<span class="heat-b">青黛</span>属黑、<span class="heat-w">朱红</span>属白，一眼看清谁死谁活。「提示」也会自动点亮。</p>
         <details class="visits-help">
           <summary>什么是思考量（visits）？</summary>
           <p>思考量是 KataGo 每手棋搜索的局面数，相当于它「读棋」的仔细程度：数值越大读得越深、棋力越强，耗时也大致成正比。
