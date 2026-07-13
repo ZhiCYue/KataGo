@@ -27,6 +27,7 @@ const state = {
   lastPosVersion: 0,
   // 上传校正
   editing: false,
+  editSource: 'upload',   // 进入编辑面板的来源：'upload' 上传校正 / 'manual' 自定义摆子
   editGame: null,
   editTurn: 1,
   pendingImage: null,     // 待识别的图片 dataURL（切换路数时复用）
@@ -803,19 +804,54 @@ function guessTurn(board) {
   return b > w ? 2 : 1;
 }
 
-function enterEditMode(size, board, turn) {
+function enterEditMode(size, board, turn, source = 'upload') {
   state.editing = true;
+  state.editSource = source;
   state.boardSize = size;
   state.editTurn = turn;
   state.editGame = new GoGame(size);
   state.editGame.setupPosition(board, turn);
   state.view.setGame(state.editGame);
   state.view.editMode = true;
+  state.view.editBrush = 'cycle';
   state.view.resize();
-  // 同步校正面板控件状态
+  // 同步校正/摆子面板控件状态
   setActive('[data-editsize]', document.querySelector(`[data-editsize="${size}"]`));
   setActive('[data-editturn]', document.querySelector(`[data-editturn="${turn}"]`));
+  setActive('[data-brush]', document.querySelector('[data-brush="cycle"]'));
+  const manual = source === 'manual';
+  $('editTitle').textContent = manual ? '自定义摆子' : '核对识别结果';
+  $('editHint').textContent = manual
+    ? '选画笔后点交叉点摆子（「循环」为空→黑→白）；摆好后设「轮到」哪方走再应用'
+    : '点击交叉点循环切换：空 → 黑 → 白';
+  $('btnEditApply').textContent = manual ? '开始对弈' : '应用并同步';
   $('editPanel').classList.add('show');
+  onEditChange();
+}
+
+/* 自定义摆子：在当前局面（新局即空盘）基础上进入编辑，手动摆黑白后开始对弈 */
+function startCustomSetup() {
+  if (state.mode !== 'game') setMode('game');
+  else exitTrialSilently();
+  if (state.editing) exitEditMode();
+  const size = state.boardSize;
+  const board = state.game ? state.game.board.map(r => r.slice())
+    : Array.from({ length: size }, () => new Array(size).fill(0));
+  enterEditMode(size, board, state.game ? state.game.turn : 1, 'manual');
+  flash('自定义摆子：选画笔点交叉点摆黑/白，完成后点「开始对弈」');
+}
+
+/* 自定义摆子时切换路数：重建对应大小的编辑盘，保留仍在盘内的棋子 */
+function resizeEditBoard(size) {
+  const old = state.editGame.board;
+  const board = Array.from({ length: size }, () => new Array(size).fill(0));
+  for (let y = 0; y < Math.min(size, old.length); y++)
+    for (let x = 0; x < Math.min(size, old[0].length); x++)
+      board[y][x] = old[y][x];
+  state.boardSize = size;
+  state.editGame = new GoGame(size);
+  state.editGame.setupPosition(board, state.editTurn);
+  state.view.setGame(state.editGame);   // 保持 editMode/editBrush 不变
   onEditChange();
 }
 
@@ -975,13 +1011,25 @@ function bindControls() {
   $('tsumegoCollection').addEventListener('change', () => {
     if (state.mode === 'tsumego') randomProblem();
   });
-  // 上传与校正
+  // 自定义摆子 / 上传与校正
+  $('btnCustom').addEventListener('click', startCustomSetup);
   $('fileInput').addEventListener('change', e => { handleUpload(e.target.files[0]); e.target.value = ''; });
   $('btnUpload').addEventListener('click', () => $('fileInput').click());
   $('btnEditApply').addEventListener('click', confirmEdit);
   $('btnEditCancel').addEventListener('click', exitEditMode);
+  document.querySelectorAll('[data-brush]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      setActive('[data-brush]', btn);
+      state.view.editBrush = btn.dataset.brush === 'cycle' ? 'cycle' : +btn.dataset.brush;
+    }));
   document.querySelectorAll('[data-editsize]').forEach(btn =>
-    btn.addEventListener('click', () => { setActive('[data-editsize]', btn); recognizeImage(+btn.dataset.editsize); }));
+    btn.addEventListener('click', () => {
+      setActive('[data-editsize]', btn);
+      const size = +btn.dataset.editsize;
+      // 自定义摆子直接换盘；上传校正则用该路数重跑识别
+      if (state.editSource === 'manual') resizeEditBoard(size);
+      else recognizeImage(size);
+    }));
   document.querySelectorAll('[data-editturn]').forEach(btn =>
     btn.addEventListener('click', () => { setActive('[data-editturn]', btn); state.editTurn = +btn.dataset.editturn; }));
 }

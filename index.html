@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css?v=20260705k" />
+  <link rel="stylesheet" href="css/style.css?v=20260713a" />
 </head>
 <body data-mode="game">
   <div class="grain"></div>
@@ -43,10 +43,19 @@
         <p id="problemNote" class="note tiny"></p>
       </div>
 
-      <!-- 上传识别后的人工校正条 -->
+      <!-- 上传识别后的人工校正条 / 自定义摆子 -->
       <div id="editPanel" class="edit-panel">
-        <div class="edit-title">核对识别结果 <span id="editCount" class="edit-count"></span></div>
-        <div class="edit-hint">点击交叉点循环切换：空 → 黑 → 白</div>
+        <div class="edit-title"><span id="editTitle">核对识别结果</span> <span id="editCount" class="edit-count"></span></div>
+        <div id="editHint" class="edit-hint">点击交叉点循环切换：空 → 黑 → 白</div>
+        <div class="edit-row">
+          <span class="edit-lab">画笔</span>
+          <div class="seg sm" id="editBrush">
+            <button data-brush="cycle" class="active">循环</button>
+            <button data-brush="1">● 黑</button>
+            <button data-brush="2">○ 白</button>
+            <button data-brush="0">擦除</button>
+          </div>
+        </div>
         <div class="edit-row">
           <span class="edit-lab">路数</span>
           <div class="seg sm">
@@ -153,10 +162,11 @@
       </section>
 
       <section class="card game-only">
-        <label class="card-label">导入布局</label>
-        <button id="btnUpload" class="btn accent full">📷 上传截图识别棋盘</button>
+        <label class="card-label">自定义 / 导入布局</label>
+        <button id="btnCustom" class="btn full">✎ 自定义摆子（手动布局）</button>
+        <button id="btnUpload" class="btn accent full gap-top-btn">📷 上传截图识别棋盘</button>
         <input id="fileInput" type="file" accept="image/*" hidden />
-        <p class="note tiny">手机上传识别后会同步，PC 端自动载入。</p>
+        <p class="note tiny">自定义摆子：手动摆好黑白后点「开始对弈」，可在上方「AI 执方」选择由谁托管；不托管则黑白皆由你落子。手机上传识别后 PC 端自动载入。</p>
       </section>
     </aside>
   </main>
@@ -193,9 +203,9 @@
 
   <script src="js/engine.js?v=20260619"></script>
   <script src="js/ai.js?v=20260619"></script>
-  <script src="js/board.js?v=20260705j"></script>
+  <script src="js/board.js?v=20260713a"></script>
   <script src="js/tsumego-bank.js?v=20260705j"></script>
   <script src="js/tsumego.js?v=20260705j"></script>
-  <script src="js/main.js?v=20260705j"></script>
+  <script src="js/main.js?v=20260713a"></script>
 </body>
 </html>

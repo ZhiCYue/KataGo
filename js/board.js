@@ -15,6 +15,7 @@ class BoardView {
     this.interactive = true;
     this.showCoords = true;
     this.editMode = false;   // 校正模式：点击交叉点循环 空→黑→白
+    this.editBrush = 'cycle'; // 画笔：'cycle' 循环 / 1 放黑 / 2 放白 / 0 擦除
     this.onEdit = null;
     this.viewport = null;    // {x0,y0,x1,y1} 只渲染该区域；null 为整盘
 
@@ -84,9 +85,15 @@ class BoardView {
   onClick(e) {
     const p = this.fromEvent(e);
     if (this.editMode) {
-      // 校正：循环 空(0)→黑(1)→白(2)→空
+      // 摆子/校正：'cycle' 循环 空(0)→黑(1)→白(2)→空；指定画笔则直接放子，再点同色即擦除
       if (p) {
-        this.game.board[p.y][p.x] = (this.game.board[p.y][p.x] + 1) % 3;
+        const cur = this.game.board[p.y][p.x];
+        if (this.editBrush === 'cycle' || this.editBrush == null) {
+          this.game.board[p.y][p.x] = (cur + 1) % 3;
+        } else {
+          const b = +this.editBrush;
+          this.game.board[p.y][p.x] = cur === b ? 0 : b;
+        }
         this.draw();
         if (this.onEdit) this.onEdit();
       }

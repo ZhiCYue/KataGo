@@ -278,6 +278,7 @@ body[data-mode="tsumego"] .game-only { display: none !important; }
 .btn.accent:hover { filter: brightness(1.06); }
 .btn.ghost { background: none; border-style: dashed; color: var(--ink-soft); }
 .btn.full { width: 100%; }
+.btn.full.gap-top-btn { margin-top: 8px; }
 
 /* —— 自定义思考量（对局 / 死活共用）—— */
 .visits-row { display: none; align-items: center; gap: 12px; margin-top: 10px; }
