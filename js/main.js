@@ -25,6 +25,7 @@ const state = {
   // 跨设备同步
   clientId: Math.random().toString(36).slice(2),
   lastPosVersion: 0,
+  posSyncPending: false,  // 本地布局正在上传同步：期间禁止轮询回包覆盖（防被旧的远端版本盖回）
   // 上传校正
   editing: false,
   editSource: 'upload',   // 进入编辑面板的来源：'upload' 上传校正 / 'manual' 自定义摆子
@@ -813,17 +814,19 @@ function enterEditMode(size, board, turn, source = 'upload') {
   state.editGame.setupPosition(board, turn);
   state.view.setGame(state.editGame);
   state.view.editMode = true;
-  state.view.editBrush = 'cycle';
+  // 默认「黑」画笔：手机上「循环」需在同一交叉点反复精准点按才切色，很难用，
+  // 改成一笔一色——点空位即落黑，切「白」落白，「擦」清子，直观且适合触屏。
+  state.view.editBrush = 1;
   state.view.resize();
   // 同步校正/摆子面板控件状态
   setActive('[data-editsize]', document.querySelector(`[data-editsize="${size}"]`));
   setActive('[data-editturn]', document.querySelector(`[data-editturn="${turn}"]`));
-  setActive('[data-brush]', document.querySelector('[data-brush="cycle"]'));
+  setActive('[data-brush]', document.querySelector('[data-brush="1"]'));
   const manual = source === 'manual';
   $('editTitle').textContent = manual ? '自定义摆子' : '核对识别结果';
   $('editHint').textContent = manual
-    ? '选画笔后点交叉点摆子（「循环」为空→黑→白）；摆好后设「轮到」哪方走再应用'
-    : '点击交叉点循环切换：空 → 黑 → 白';
+    ? '选画笔（黑/白/擦）后点交叉点摆子，点同色子可擦除；摆好后设「轮到」哪方走再应用'
+    : '选画笔（黑/白/擦）后点交叉点校正，点同色子可擦除';
   $('btnEditApply').textContent = manual ? '开始对弈' : '应用并同步';
   $('editPanel').classList.add('show');
   onEditChange();
@@ -877,7 +880,14 @@ function confirmEdit() {
   const turn = state.editTurn;
   exitEditMode();
   applyImportedPosition(size, board, turn);
-  // 同步到后端，供其它设备（PC）拉取
+  // 「开始对弈/应用」按钮在下方的编辑面板里，手机上确认后页面仍停在面板处、
+  // 棋盘被顶出可视区（看着像「棋盘没了」）。棋盘是页面首屏内容，滚回顶部即可
+  // 落在吸顶头部下方完整可见。
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  // 同步到后端，供其它设备（PC）拉取。上传同步在途期间，本地刚摆好的布局尚未拿到
+  // 自己的新版本号，而后端里可能还留着更高版本的「上一份布局」（如另一端上传的）——
+  // 置 posSyncPending 让轮询回包在此期间不覆盖本地，等 POST 回来把版本号提上去再解禁。
+  state.posSyncPending = true;
   fetch(state.backendUrl + '/position', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -885,7 +895,8 @@ function confirmEdit() {
   })
     .then(r => r.json())
     .then(j => { if (j.version) state.lastPosVersion = j.version; flash('已应用并同步到 PC'); })
-    .catch(() => flash('已应用（同步失败，后端未连接）'));
+    .catch(() => flash('已应用（同步失败，后端未连接）'))
+    .finally(() => { state.posSyncPending = false; });
 }
 
 /* 把任意布局载入为当前对局 */
@@ -919,11 +930,18 @@ function boardToStones(board, size) {
 /* —— PC 端轮询：自动同步手机上传的最新布局 —— */
 function pollPosition(applyEvenIfOwn) {
   if (state.mode !== 'game') return;
+  const ep = state.epoch;                                // 记下发起时的局面代数
   fetch(state.backendUrl + '/position')
     .then(r => r.json())
     .then(j => {
+      // 在途期间本地已换局/自定义摆子/落子（epoch 变了）——丢弃迟到回包，
+      // 否则初次加载的慢回包会把刚摆好的自定义局面覆盖回「上次的棋局」。
+      if (state.epoch !== ep) return;
+      if (state.posSyncPending) return;                  // 本地布局正在上传同步，别被旧版本盖回
       if (!j || !j.version || j.version <= state.lastPosVersion) return;
-      if (state.editing) return;                         // 正在校正时不打断
+      // 正在校正/摆子时不打断用户；但仍记下「已见的最新版本」，否则退出编辑后（尤其
+      // 上传同步失败时）这条更高版本会被当成「新布局」把刚摆好的自定义局面盖回去。
+      if (state.editing) { state.lastPosVersion = j.version; return; }
       if (j.source === state.clientId && !applyEvenIfOwn) { state.lastPosVersion = j.version; return; }
       state.lastPosVersion = j.version;
       applyImportedPosition(j.size, j.board, j.turn || 1);

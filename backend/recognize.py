@@ -81,76 +81,94 @@ def _mode_spacing(diffs):
     return float(best_g) if best_g else None
 
 
-def _axis_spacing(clusters):
-    """返回某方向网格的间距估计 g（基于相邻间距众数，抗 UI 栏/边框干扰）。"""
-    if len(clusters) < 5:
+# 连续板块允许的最大内部空缺（格位数）：满盘棋时最外几路可能连片被遮挡、检不出，
+# 需容忍一定空缺；但棋盘与盘外 UI（顶部信息栏、底部聊天区）之间隔得很远，
+# 超过此值即视为跨到 UI 区、断开，从而把棋盘从整张截图里切出来。
+_MAX_GAP = 5
+
+
+def _fit_axis(clusters, g):
+    """给定间距 g，在一组线位置里拟合等距格，返回 (lo, hi, n, count)。
+
+    1) 相位对齐：找一条让最多检出线落在其上的等距格（anchor+i·g），抗遮挡。
+    2) 最大连续板块：把命中的线按格位排序，相邻格位空缺 >_MAX_GAP 即断开，
+       取线最多的一段作为棋盘——聊天栏/头像/外框等远离主体的杂线被自动切除。
+    count 为板块内命中线数，供在多个候选 g 间打分选优。
+    """
+    if not clusters or not g:
         return None
-    diffs = np.diff(np.array(clusters))
+    c = np.array(sorted(clusters), dtype=float)
+    tol = 0.18 * g
+    best, best_c = None, 0
+    for anchor in c:
+        k = np.round((c - anchor) / g)
+        inliers = c[np.abs(c - (anchor + k * g)) <= tol]
+        if len(inliers) > best_c:
+            best_c, best = len(inliers), inliers
+    if best is None or best_c < 5:
+        return None
+    pos = np.sort(best)
+    ks = np.round((pos - pos[0]) / g).astype(int)
+    segs, start = [], 0
+    for i in range(1, len(ks)):
+        if ks[i] - ks[i - 1] > _MAX_GAP:
+            segs.append((start, i))
+            start = i
+    segs.append((start, len(ks)))
+    a, b = max(segs, key=lambda s: (s[1] - s[0], ks[s[1] - 1] - ks[s[0]]))
+    pos = pos[a:b]
+    lo, hi = float(pos[0]), float(pos[-1])
+    n = int(round((hi - lo) / g)) + 1
+    return lo, hi, n, (b - a)
+
+
+def _choose_grid(xs_raw, ys_raw, W, H, force_size):
+    """选定路数 N 与横竖网格坐标。
+
+    棋盘格子是正方形，横竖两轴的真实间距相同。用相邻间距众数作初值、在 ±15% 内细搜
+    公共间距 g，取「两轴最大连续板块命中线最多、且两轴路数最接近」的 g。这样某一轴被
+    外框/UI 杂线带偏（间距算小、多算一路、采样点整盘漂移）时，会被另一轴的一致性纠正。
+    """
+    cx = _cluster(xs_raw, max(3, W * 0.006)) if len(xs_raw) >= 5 else []
+    cy = _cluster(ys_raw, max(3, H * 0.006)) if len(ys_raw) >= 5 else []
+    if len(cx) < 5 or len(cy) < 5:
+        return None
+    diffs = np.concatenate([np.diff(np.array(sorted(cx))), np.diff(np.array(sorted(cy)))])
     diffs = diffs[diffs > 2]
     if len(diffs) < 4:
         return None
     g0 = _mode_spacing(diffs)
     if not g0 or g0 < 4:
         return None
-    near = diffs[np.abs(diffs - g0) <= 0.15 * g0]   # 用接近众数的间距取中位，更精确
-    return float(np.median(near)) if len(near) else g0
 
-
-def _grid_axis(clusters):
-    """某方向：定位网格，返回 (lo, hi, g_精确, n)。
-
-    用「相位对齐」而非连续链：满盘棋时某一侧的网格线几乎全被棋子切断、检不出，
-    连续链会严重少算路数。改为找一条让最多检出线落在其上的等距格（lo+i·g），
-    再用落在格上的最外两条线作为网格两端——中间缺多少线都不影响定路数与定界。
-    棋盘外框 / UI 栏因不在该等距相位上而被自动排除。
-    """
-    g = _axis_spacing(clusters)
-    if not g:
+    best = None                             # (score, ax, ay)
+    for g in np.linspace(g0 * 0.85, g0 * 1.15, 61):
+        ax = _fit_axis(cx, g)
+        ay = _fit_axis(cy, g)
+        if ax is None or ay is None:
+            continue
+        score = ax[3] + ay[3] - 2 * abs(ax[2] - ay[2])   # 命中线多、两轴路数接近
+        if best is None or score > best[0]:
+            best = (score, ax, ay)
+    if best is None:
         return None
-    c = np.array(sorted(clusters), dtype=float)
-    tol = 0.18 * g
-    best_inliers, best_count = None, 0
-    for anchor in c:                       # 以每条线为锚试一条等距格，取命中最多者
-        k = np.round((c - anchor) / g)
-        resid = np.abs(c - (anchor + k * g))
-        inliers = c[resid <= tol]
-        if len(inliers) > best_count:
-            best_count, best_inliers = len(inliers), inliers
-    if best_inliers is None or best_count < 5:
-        return None
-
-    # 按格位排序，裁掉「与主体隔着≥2个空位」的孤立端点（多为棋盘外框线；
-    # 真实棋盘最外两条线一般相邻、不会被裁）。中间空多少（被遮挡）都不动。
-    pos = np.sort(best_inliers)
-    ks = np.round((pos - pos[0]) / g).astype(int)
-    while len(ks) >= 2 and ks[1] - ks[0] >= 2:
-        ks, pos = ks[1:], pos[1:]
-    while len(ks) >= 2 and ks[-1] - ks[-2] >= 2:
-        ks, pos = ks[:-1], pos[:-1]
-
-    lo, hi = float(pos[0]), float(pos[-1])
-    n = int(round((hi - lo) / g)) + 1
-    g_precise = (hi - lo) / (n - 1) if n > 1 else g
-    return lo, hi, g_precise, n
-
-
-def _choose_grid(xs_raw, ys_raw, W, H, force_size):
-    """选定路数 N 与横竖网格坐标。两轴各自定位，路数取均值后吸附到 {9,13,19}。"""
-    ax = _grid_axis(_cluster(xs_raw, max(3, W * 0.006))) if len(xs_raw) >= 5 else None
-    ay = _grid_axis(_cluster(ys_raw, max(3, H * 0.006))) if len(ys_raw) >= 5 else None
-    if ax is None or ay is None:
-        return None
+    _, ax, ay = best
 
     if force_size in ALLOWED_SIZES:
         N = int(force_size)
     else:
-        avg = (ax[3] + ay[3]) / 2.0
+        avg = (ax[2] + ay[2]) / 2.0
         N = min(ALLOWED_SIZES, key=lambda s: abs(s - avg))
 
-    # 以检出的网格起线 + 精确间距铺 N 条线（n 与 N 一致时即两端 linspace，无漂移）
-    xs = ax[0] + np.arange(N) * ax[2]
-    ys = ay[0] + np.arange(N) * ay[2]
-    return None, None, N, xs, ys
+    # 铺 N 条线：n 与 N 一致时用两端 linspace（无漂移），否则按精确间距外推
+    def _lay(axis):
+        lo, hi, n, _ = axis
+        if N > 1 and n == N:
+            return np.linspace(lo, hi, N)
+        gp = (hi - lo) / (n - 1) if n > 1 else g0
+        return lo + np.arange(N) * gp
+
+    return None, None, N, _lay(ax), _lay(ay)
 
 
 def _classify(gray, xs, ys):
